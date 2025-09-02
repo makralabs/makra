@@ -42,3 +42,12 @@ Front end: Javascript, React, Tailwind
 Backend: Go, Python
 
 
+
+
+
+
+
+# Prompt example
+
+
+From github, 
