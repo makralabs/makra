@@ -23,3 +23,5 @@ fixtures
 
 
 /tmp
+
+**/*.log
