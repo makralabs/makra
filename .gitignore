@@ -25,3 +25,5 @@ fixtures
 /tmp
 
 **/*.log
+
+.myenv
