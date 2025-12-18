@@ -1,4 +1,4 @@
-# goatscrape
+# We believe, simplicity in impl is the key to building complex systems
 
 
 Blueprint
