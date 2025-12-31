@@ -3,7 +3,7 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "makra"
+name = "makra-test-test"
 version = "0.1.0"
 authors = [
     { name = "Makra Labs", email = "dev@makralabs.org" },
@@ -51,7 +51,27 @@ packages = ["makra"]
 [tool.hatch.build.targets.sdist]
 include = [
     "makra/**/*.py",
+    "makra/py.typed",
     "README.md",
     "LICENSE",
     "pyproject.toml",
 ]
+
+[tool.hatch.build]
+include = [
+    "makra/**/*.py",
+    "makra/py.typed",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
