@@ -27,3 +27,5 @@ fixtures
 **/*.log
 
 .myenv
+
+.venv
