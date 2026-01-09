@@ -58,3 +58,71 @@ result = await ns.extract(
 ```
 
 > See the SDK examples for more advanced scenarios and options.
+
+# Running the Project in Development Mode
+
+## Prerequisites
+
+-   **Docker** and **Docker Compose** installed ([see Docker docs](https://docs.docker.com/get-docker/))
+-   **Make** utility (usually available by default on Unix-like systems)
+-   Clone this repository and navigate to its root in your terminal
+
+## Available Services
+
+This project is composed of several services managed via `docker-compose.yaml` and invoked conveniently using the provided `Makefile`:
+
+-   **chromadb**: Vector database for embeddings
+-   **mongodb**: Document database used for persistent storage
+-   **marcus**: One of the server backend services (development mode)
+-   **moleman**: Another backend service (development mode, manages browsers)
+-   **morpheus**: The primary server (development mode, depends on others)
+
+## How to Start Everything for Local Development
+
+The recommended approach is to spin up **all** services at once:
+
+```sh
+make all
+```
+
+This command will start every service defined in the Docker Compose file, including databases and app servers, enabling a complete development environment.
+
+---
+
+## Running Specific Service Groups
+
+### To Run Only the Databases
+
+Launches `chromadb` and `mongodb` containers:
+
+```sh
+make databases
+```
+
+### To Run Only All Server Backends
+
+Starts all backend app services (`marcus`, `moleman`, and `morpheus`):
+
+```sh
+make servers
+```
+
+### To Start All Morpheus Dependencies
+
+If you want to locally run **morpheus** on your host (not in Docker) but need its required databases and service dependencies:
+
+```sh
+make dependencies-for-morpheus
+```
+
+This will spin up all the required dependencies for morpheus except the morpheus server itself (so you can run or hot-reload it locally).
+
+---
+
+### Notes
+
+-   All containers run in development mode by default.
+-   Hot reloading is enabled for server services.
+-   If you need to customize environment variables, check `.env` or the `environment:` sections in `docker-compose.yaml`.
+
+For any custom orchestration, see the `Makefile` and `docker-compose.yaml` for more details.
