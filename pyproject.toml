@@ -1,0 +1,12 @@
+[tool.uv.workspace]
+members = [
+    "packages/marcus",
+    "packages/moleman",
+    "packages/morpheus",
+    "packages/shared",
+]
+
+[project]
+name = "makra-workspace"
+version = "0.1.0"
+requires-python = ">=3.12"
