@@ -4,6 +4,7 @@ members = [
     "packages/moleman",
     "packages/morpheus",
     "packages/shared",
+    "packages/sdk/python",
 ]
 
 [project]
