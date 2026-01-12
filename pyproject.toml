@@ -1,3 +1,26 @@
+[project]
+name = "makra-workspace"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+    # don't want to download torch now
+	# "marcus",
+	"moleman",
+	"morpheus",
+    # i think this sub dependency of others so it should be handled there not here
+	# "makra-shared",
+	"makra",
+]
+
+[tool.uv.sources]
+# marcus = { workspace = true }
+moleman = { workspace = true }
+morpheus = { workspace = true }
+# makra-shared = { workspace = true }
+makra = { workspace = true }
+
 [tool.uv.workspace]
 members = [
     "packages/marcus",
@@ -6,8 +29,3 @@ members = [
     "packages/shared",
     "packages/sdk/python",
 ]
-
-[project]
-name = "makra-workspace"
-version = "0.1.0"
-requires-python = ">=3.12"
