@@ -1,0 +1,13 @@
+{
+    "typeCheckingMode": "basic",
+    "reportMissingImports": true,
+    "reportMissingTypeStubs": false,
+    "venvPath": ".",
+    "venv": ".venv",
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "**/dist",
+        "**/build"
+    ]
+}

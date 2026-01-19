@@ -17,3 +17,11 @@
 **/*.egg
 
 **/.DS_Store
+
+CLAUDE.md
+
+/.claude
+
+# Ignore all Markdown files, But keep README.md
+*.md
+!README.md
