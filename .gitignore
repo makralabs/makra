@@ -23,5 +23,8 @@ CLAUDE.md
 /.claude
 
 # Ignore all Markdown files, But keep README.md
-*.md
+AGENTS.md
+CLAUDE.md
 !README.md
+
+packages/morpheus/docs/
