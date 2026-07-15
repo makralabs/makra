@@ -25,6 +25,7 @@ CLAUDE.md
 
 # Ignore all Markdown files, But keep README.md
 AGENTS.md
+AGENTS-2.md
 CLAUDE.md
 !README.md
 
