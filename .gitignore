@@ -32,14 +32,9 @@ secrets/
 
 **/.DS_Store
 
-CLAUDE.md
-
 /.claude
 
 # Ignore all Markdown files, But keep README.md
-AGENTS.md
-AGENTS-2.md
-CLAUDE.md
 !README.md
 
 packages/morpheus/docs/
