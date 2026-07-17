@@ -9,7 +9,20 @@
 **/.venv
 **/*.log
 
-**/*.env
+# Local environment files and secret material. Commit only the sanitized template.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+**/secrets/
 
 **/fixtures
 
