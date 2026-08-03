@@ -9,6 +9,7 @@ dev = [
 	# "marcus",
 	"moleman",
 	"morpheus",
+	"makra-telemetry",
     # i think this sub dependency of others so it should be handled there not here
 	# "makra-shared",
 	"makra",
@@ -18,6 +19,7 @@ dev = [
 # marcus = { workspace = true }
 moleman = { workspace = true }
 morpheus = { workspace = true }
+makra-telemetry = { workspace = true }
 # makra-shared = { workspace = true }
 makra = { workspace = true }
 
@@ -26,6 +28,7 @@ members = [
     "packages/marcus",
     "packages/moleman",
     "packages/morpheus",
+    "packages/telemetry",
     "packages/shared",
     "packages/sdk/python",
 ]
