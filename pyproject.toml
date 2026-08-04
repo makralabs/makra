@@ -32,3 +32,8 @@ members = [
     "packages/shared",
     "packages/sdk/python",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: live external services (not part of the default suite)",
+]
