@@ -7,7 +7,6 @@ requires-python = ">=3.12"
 dev = [
     # don't want to download torch now
 	# "marcus",
-	"moleman",
 	"morpheus",
 	"makra-telemetry",
     # i think this sub dependency of others so it should be handled there not here
@@ -17,7 +16,6 @@ dev = [
 
 [tool.uv.sources]
 # marcus = { workspace = true }
-moleman = { workspace = true }
 morpheus = { workspace = true }
 makra-telemetry = { workspace = true }
 # makra-shared = { workspace = true }
@@ -26,7 +24,6 @@ makra = { workspace = true }
 [tool.uv.workspace]
 members = [
     "packages/marcus",
-    "packages/moleman",
     "packages/morpheus",
     "packages/telemetry",
     "packages/shared",
