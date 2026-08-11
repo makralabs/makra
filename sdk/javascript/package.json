@@ -1,0 +1,38 @@
+{
+  "name": "makra",
+  "version": "0.1.0",
+  "description": "Official JavaScript SDK for the Makra API",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "pack:check": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "makra",
+    "scraping",
+    "extraction"
+  ],
+  "license": "MIT",
+  "author": "Makra Labs",
+  "homepage": "https://makralabs.org",
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
