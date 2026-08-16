@@ -15,9 +15,13 @@ const url = process.argv[2];
 if (url) {
   const result = await client.extract({
     urls: [url],
-    outputSchema: {
+    schema: {
       title: "The page title",
       description: "A short description of the page",
+    },
+    config: {
+      validation_mode: "repair",
+      memory: { enabled: true, selector_chain_version: "v2" },
     },
   });
   console.log("extract:", JSON.stringify(result, null, 2));

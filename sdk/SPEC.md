@@ -12,22 +12,23 @@ Where this document and an implementation disagree, this document wins.
 The SDK provides a small, typed client for the public Makra HTTP API. Version
 0.1 covers:
 
-- API connectivity checks;
-- structured extraction;
-- preprocessing;
-- page-schema generation;
-- formatting a page as Markdown;
-- production/development configuration;
-- bearer authentication ready for API-key enforcement;
-- consistent HTTP and transport errors.
+- API connectivity and readiness checks;
+- structured extraction from one or more URLs;
+- page-schema generation for a single URL;
+- all three workflow response modes: blocking, streaming (SSE), and deferred;
+- run management: status, listing, cancellation, polling, result retrieval;
+- request-overridable workflow configuration;
+- API-key authentication and idempotent submission;
+- bounded automatic retries for transient failures;
+- consistent HTTP, transport, and stream errors.
 
 The SDK is a transport wrapper. It MUST NOT reinterpret successful response
 payloads, hide Makra response metadata, or couple users to server-internal
 Python models.
 
-Streaming extraction, automatic retries, pagination orchestration, browser
-configuration, provider configuration, telemetry processing, and API-key
-issuance are outside version 0.1. These require a future spec revision.
+Natural-language query extraction, request-level `actions`, provider
+configuration, telemetry processing, and API-key issuance are outside version
+0.1. These require a future spec revision.
 
 ## 2. Packages and runtime support
 
@@ -47,16 +48,24 @@ JavaScript.
 
 ### 3.1 Defaults
 
-| Setting | Default |
-| --- | --- |
-| Production base URL | `https://api.makralabs.org` |
-| Development base URL constant | `http://localhost:6900` |
-| API version | `v1` |
-| API key fallback | `makra-development-key` |
-| Request timeout | Python: 120 seconds; JavaScript: 120,000 milliseconds |
+| Setting | Default | Rationale |
+| --- | --- | --- |
+| Production base URL | `https://api.makralabs.org` | |
+| Development base URL constant | `http://localhost:8080` | |
+| API key fallback | `makra-development-key` | |
+| Request timeout | 300 s / 300,000 ms | A blocking submission holds the connection until the run is terminal |
+| Connect timeout (Python only) | 10 s | |
+| Stream idle timeout | 90 s / 90,000 ms | The gateway heartbeats every 15 s; a far larger gap means a dead connection |
+| Max retries | 2 | |
+| Retry backoff base | 0.5 s / 500 ms | |
+| Retry backoff ceiling | 8 s / 8,000 ms | |
+| Poll interval floor | 2 s / 2,000 ms | |
+
+Durations are expressed in the unit idiomatic to each language: seconds in
+Python, milliseconds in JavaScript.
 
 The production URL MUST be the default. Development scripts MUST explicitly
-select the development URL.
+select the development URL (local public API gateway).
 
 The dummy API key is temporary. It ensures development requests exercise the
 production authentication wire format before the server enforces keys. It is
@@ -73,26 +82,48 @@ Configuration MUST resolve in this order:
 
 The supported environment variables are:
 
-- `MAKRA_API_KEY`
-- `MAKRA_BASE_URL`
+| Variable | Setting | Unit |
+| --- | --- | --- |
+| `MAKRA_API_KEY` | API key | — |
+| `MAKRA_BASE_URL` | Base URL | — |
+| `MAKRA_TIMEOUT` | Request timeout | **seconds in both languages** |
+| `MAKRA_MAX_RETRIES` | Retry budget | count |
+
+`MAKRA_TIMEOUT` is language-neutral, so it is read in seconds even by the
+JavaScript SDK, which converts it to milliseconds internally.
 
 An explicit empty API key is treated as absent and falls through to the
 environment/default. A base URL MUST be an absolute `http://` or `https://`
-URL. Trailing slashes MUST be removed before path construction. An API version
-MUST tolerate surrounding slashes but MUST NOT be empty after normalization.
+URL. Trailing slashes MUST be removed before path construction.
+
+Timeouts and backoffs MUST be greater than zero and the retry budget MUST NOT
+be negative; violations fail at construction time (§8.2).
 
 ### 3.3 Authentication and common headers
 
 Every request, including development requests and `ping`, MUST send:
 
 ```http
-Authorization: Bearer <api-key>
+Api-Key: <api-key>
 Content-Type: application/json
-Accept: application/json, text/plain, text/markdown
+Accept: application/json
 ```
 
 Each implementation SHOULD also send a language-specific user agent containing
 the SDK version. API keys MUST NOT appear in exception messages or logs.
+
+Request-specific headers are added per operation:
+
+| Header | Sent on | Value |
+| --- | --- | --- |
+| `Idempotency-Key` | every workflow submission | caller-supplied, else `makra-sdk-<uuid4 hex>` |
+| `Prefer` | deferred submissions | `respond-async` |
+| `Accept` | streaming requests | `text/event-stream` |
+| `Last-Event-ID` | resumed streams | highest sequence already delivered |
+
+The API key MUST NOT be sent to any host other than the configured base URL.
+This is normative for result retrieval, which redirects to presigned object
+storage (§5.9).
 
 ## 4. Public clients
 
@@ -102,8 +133,14 @@ The package MUST export:
 
 - `Makra`: synchronous client;
 - `AsyncMakra`: asynchronous client with the same operations;
-- `MakraError`, `MakraAPIError`, and `MakraConnectionError`;
-- `PRODUCTION_BASE_URL`, `DEVELOPMENT_BASE_URL`, and `DUMMY_API_KEY`.
+- `RunHandle` and `AsyncRunHandle`;
+- `WorkflowEvent`;
+- the full error hierarchy of §8.1;
+- `PRODUCTION_BASE_URL`, `DEVELOPMENT_BASE_URL`, `SDK_VERSION`, and the enum
+  namespaces `ExecutionModes`, `ValidationModes`, `SelectorChainVersions`,
+  `ProxyRegionScopes`, `Features`, `RunStates`, `EventTypes`, `ErrorCodes`;
+- typed config aliases used by operations (`CommonConfig`, `ExtractConfig`,
+  `SchemaConfig`) and response aliases (`RunView`, `RunPage`, `AsyncAdmission`).
 
 Constructor:
 
@@ -112,8 +149,12 @@ Makra(
     api_key: str | None = None,
     *,
     base_url: str | None = None,
-    api_version: str = "v1",
-    timeout: float = 120.0,
+    timeout: float = 300.0,
+    connect_timeout: float = 10.0,
+    stream_idle_timeout: float = 90.0,
+    max_retries: int = 2,
+    retry_backoff: float = 0.5,
+    default_headers: Mapping[str, str] | None = None,
 )
 ```
 
@@ -129,8 +170,10 @@ stable response schemas are specified.
 The package MUST export:
 
 - `Makra`;
-- `MakraError`, `MakraAPIError`, and `MakraConnectionError`;
-- `PRODUCTION_BASE_URL`, `DEVELOPMENT_BASE_URL`, and `DUMMY_API_KEY`;
+- `RunHandle`, `WorkflowEvent`, and `SSEDecoder`;
+- the full error hierarchy of §8.1;
+- `PRODUCTION_BASE_URL`, `DEVELOPMENT_BASE_URL`, `DUMMY_API_KEY`,
+  `SDK_VERSION`, and the enum namespaces listed in §4.1;
 - declarations for all public options and JSON values.
 
 Constructor:
@@ -139,14 +182,22 @@ Constructor:
 new Makra({
   apiKey,
   baseUrl,
-  apiVersion = "v1",
-  timeout = 120_000,
+  timeout = 300_000,
+  streamIdleTimeout = 90_000,
+  maxRetries = 2,
+  retryBackoff = 500,
+  defaultHeaders = {},
 } = {})
 ```
 
-JavaScript public operation names and arguments use `camelCase`. Every
-operation returns a `Promise`. No close method is required because the standard
-`fetch` transport owns no per-client resource.
+JavaScript public operation names and arguments use `camelCase`. Nested
+workflow `config` objects use the wire field names from §6 (snake_case keys).
+Non-streaming operations return a `Promise`; streaming operations return an
+`AsyncGenerator` of `WorkflowEvent`. No close method is required because the
+standard `fetch` transport owns no per-client resource.
+
+Every operation MUST accept an optional `signal` (`AbortSignal`). A caller
+abort MUST propagate untouched so it stays distinguishable from a timeout.
 
 ## 5. Operation contract
 
@@ -154,124 +205,329 @@ This section defines the public signature, HTTP request, and wire-name mapping.
 No implementation may add, omit, or rename wire fields without updating this
 spec.
 
-### 5.1 `ping`
+### 5.0 Response modes
 
-Checks whether the Makra service is reachable.
+Both workflows accept the same input in three response modes. The mode is
+selected entirely by the request, and each mode has its own SDK method so the
+return type is unambiguous.
+
+| Mode | Selected by | Server response | SDK methods |
+| --- | --- | --- | --- |
+| Blocking | neither of the below | `200` with the workflow envelope | `extract`, `schema` |
+| Streaming | body `"stream": true` | `200 text/event-stream` | `extract_stream`, `schema_stream` |
+| Deferred | header `Prefer: respond-async` | `202` with an admission object | `submit_extract`, `submit_schema` |
+
+A client MUST NOT send both `"stream": true` and `Prefer: respond-async` on one
+request.
+
+### 5.1 `ping` and `ready`
+
+Connectivity checks. `ping` reaches only the gateway; `ready` additionally
+confirms that result storage is reachable.
 
 | Item | Value |
 | --- | --- |
-| Method/path | `GET /ping` |
+| Method/path | `GET /healthz`, `GET /healthz/ready` |
 | Request body | none |
-| Python | `ping()` |
-| JavaScript | `ping()` |
-| Typical response | `{"message": "pong"}` |
-
-`ping` deliberately uses the unversioned service route.
+| Python | `ping()`, `ready()` |
+| JavaScript | `ping()`, `ready()` |
 
 ### 5.2 `extract`
 
-Extracts structured information from one or more pages.
+Extracts structured information from one or more pages using a JSON target
+schema. Natural-language `query` input is not supported.
 
 | Item | Python | JavaScript | Wire field |
 | --- | --- | --- | --- |
 | URLs, required | `urls` | `urls` | `urls` |
-| Schema, required | `output_schema` | `outputSchema` | `output_schema` |
-| Actions, optional | `actions` | `actions` | `actions` |
+| Schema, required | `schema` | `schema` | `schema` |
+| Execution mode, optional | `execution_mode` | `executionMode` | `execution_mode` |
 | Config, optional | `config` | `config` | `config` |
 
 HTTP request:
 
 ```http
-POST /api/{api_version}/extract
+POST /workflows/extract
 ```
 
 ```json
 {
   "urls": ["https://example.com"],
-  "output_schema": {"title": "The page title"},
-  "actions": [],
+  "schema": {"title": "The page title"},
+  "execution_mode": "concurrent",
   "config": {}
 }
 ```
 
-`urls` MUST contain at least one non-empty string. `output_schema` MUST be a
-non-empty JSON object or array. Omitted `actions` and `config` MUST be sent as
-`[]` and `{}` respectively. Supported server actions currently include
-`navigation` and `pagination`; clients MUST pass action strings through so the
-server remains authoritative.
+`urls` MUST contain at least one non-empty string. `schema` MUST be a non-empty
+JSON object or array. The schema is a target shape with field descriptions, not
+necessarily a strict JSON Schema document.
+
+`execution_mode` MUST be `"concurrent"` (default when omitted) or
+`"sequential"`. Omitted `config` MUST be sent as `{}`.
+
+Clients MUST NOT send `query`, `actions`, or `output_schema`.
 
 Python signature:
 
 ```python
-extract(urls, output_schema, *, actions=None, config=None)
+extract(urls, schema, *, execution_mode="concurrent", config=None)
 ```
 
 JavaScript signature:
 
 ```js
-extract({ urls, outputSchema, actions = [], config = {} })
+extract({ urls, schema, executionMode = "concurrent", config = {} })
 ```
 
-### 5.3 `preprocess`
+### 5.3 `schema`
 
-Preprocesses and annotates pages for later extraction.
+Builds or reconstructs an extraction schema for one page.
+
+| Item | Python | JavaScript | Wire field | Default |
+| --- | --- | --- | --- | --- |
+| URL, required | `url` | `url` | `url` | required |
+| Only memoized, optional | `only_memoized` | `onlyMemoized` | `only_memoized` | `false` |
+| Config, optional | `config` | `config` | `config` | `{}` |
 
 HTTP request:
 
 ```http
-POST /api/{api_version}/preprocess
+POST /workflows/schema
 ```
 
 ```json
 {
-  "urls": ["https://example.com"],
-  "options": {}
+  "url": "https://example.com/products",
+  "only_memoized": false,
+  "config": {}
 }
 ```
 
-`urls` follows the common URL validation rule. Omitted `options` MUST be sent
-as `{}`.
+`url` MUST be a non-empty string. Omitted `config` MUST be sent as `{}`.
 
-Python: `preprocess(urls, *, options=None)`
+Python: `schema(url, *, only_memoized=False, config=None)`
 
-JavaScript: `preprocess({ urls, options = {} })`
+JavaScript: `schema({ url, onlyMemoized = false, config = {} })`
 
-### 5.4 `page_schema` / `pageSchema`
+### 5.4 Streaming variants
 
-Builds Makra's page schema for one or more pages.
+| Item | Python | JavaScript |
+| --- | --- | --- |
+| Extract | `extract_stream(urls, schema, *, execution_mode, config, idempotency_key)` | `extractStream({ urls, schema, executionMode, config, idempotencyKey, signal })` |
+| Schema | `schema_stream(url, *, only_memoized, config, idempotency_key)` | `schemaStream({ url, onlyMemoized, config, idempotencyKey, signal })` |
 
-HTTP request:
+The request body is that of §5.2/§5.3 with `"stream": true` added. `Accept`
+MUST be `text/event-stream`.
+
+Argument validation MUST happen when the method is called, not when the
+returned iterator is first advanced.
+
+Implementations MUST reject a non-`text/event-stream` success response with
+`MakraStreamError` rather than silently returning no events.
+
+### 5.5 Event contract
+
+The gateway frames events per the WHATWG SSE specification. Implementations
+MUST handle: `id`, `event`, and `data` fields; multi-line `data` joined with
+`\n`; a leading single space stripped from each value; comment lines beginning
+with `:` (the gateway sends `: keepalive` every 15 seconds) ignored; and a
+blank line dispatching the accumulated message.
+
+Each dispatched message MUST be exposed as an event object:
+
+| Concept | Python | JavaScript | Source |
+| --- | --- | --- | --- |
+| Event name | `type` | `type` | SSE `event:` |
+| Monotonic sequence | `sequence` | `sequence` | SSE `id:`, `0` when absent |
+| Decoded body | `payload` | `payload` | SSE `data:` |
+| Owning run | `run_id` | `runId` | `X-Makra-Run-Id` |
+| Closes the stream | `is_terminal` | `isTerminal` | derived |
+| Step name | `detail_type` | `detailType` | `payload.stream_event_type` |
+| Status / reason / success | `status`, `reason`, `success` | same, camelCase | payload fields |
+
+Terminal event names are `workflow.run.completed`, `workflow.run.failed`,
+`workflow.run.cancelled`, and `workflow.run.budget_exhausted`. Iteration MUST
+stop after yielding a terminal event.
+
+A stream MUST NOT be treated as carrying the result payload. Callers obtain
+data through §5.9 after a terminal event.
+
+### 5.6 Stream resumption
+
+If a stream ends without a terminal event — connection reset, or silence
+exceeding the stream idle timeout — the implementation MUST attempt to resume,
+up to the retry budget, by issuing:
 
 ```http
-POST /api/{api_version}/page-schema
+GET /workflows/runs/{run_id}/events
+Last-Event-ID: <highest sequence delivered>
 ```
 
-| Python | JavaScript | Wire field | Default |
+Resumption MUST NOT repeat the original `POST`, which would start a second
+billable run. Delivering an event MUST reset the retry budget, so a long,
+healthy run is never cut short by earlier reconnects. When the run id is
+unknown or the budget is exhausted, the implementation MUST raise
+`MakraStreamError` carrying the run id when known.
+
+### 5.7 Deferred submission
+
+| Item | Python | JavaScript |
+| --- | --- | --- |
+| Extract | `submit_extract(...) -> RunHandle` | `submitExtract(...) -> Promise<RunHandle>` |
+| Schema | `submit_schema(...) -> RunHandle` | `submitSchema(...) -> Promise<RunHandle>` |
+
+The request body is that of §5.2/§5.3 with `Prefer: respond-async`. The server
+answers `202` with an admission object, and the SDK wraps it in a handle
+exposing `id`, `feature`, `state`, `status_url`, `events_url`, `result_url`,
+and the raw `admission`.
+
+A handle MUST offer `refresh`, `wait`, `stream`, `result`, and `cancel`, each
+delegating to the corresponding client operation in §5.8–§5.9. A handle is a
+convenience only: a run id alone MUST be sufficient to do everything a handle
+can do.
+
+### 5.8 Run management
+
+| Operation | Method/path | Python | JavaScript |
 | --- | --- | --- | --- |
-| `urls` | `urls` | `urls` | required |
-| `output_type` | `outputType` | `output_type` | `"json"` |
-| `debug_mode` | `debugMode` | `debug_mode` | `false` |
-| `debug_output_type` | `debugOutputType` | `debug_output_type` | `"text"` |
+| Fetch one run | `GET /workflows/runs/{id}` | `get_run(run_id)` | `getRun(runId)` |
+| List runs | `GET /workflows/runs` | `list_runs(*, limit, cursor, feature, state)` | `listRuns({ limit, cursor, feature, state })` |
+| Cancel | `POST /workflows/runs/{id}/cancel` | `cancel_run(run_id)` | `cancelRun(runId)` |
+| Stream events | `GET /workflows/runs/{id}/events` | `stream_run_events(run_id, *, last_event_id)` | `streamRunEvents(runId, { lastEventId })` |
+| Poll to terminal | — | `wait_for_run(run_id, ...)` | `waitForRun(runId, ...)` |
 
-`output_type`/`outputType` MUST be `json` or `text`. JSON output is decoded;
-text output is returned as a string.
+Terminal run states are `completed`, `failed`, `cancelled`, and
+`budget_exhausted`.
 
-### 5.5 `format_markdown` / `formatMarkdown`
+`wait_for_run` MUST poll until the run is terminal or the timeout expires, and
+MUST respect the server's `poll_after_ms` hint as a lower bound on the interval.
+A non-`completed` terminal state raises `MakraRunFailedError` unless the caller
+opts out (`raise_on_failure=False` / `throwOnFailure: false`). A `completed`
+run whose payload reports `success: false` is a domain outcome, not an SDK
+error, and MUST be returned.
 
-Formats one page as Markdown using the stable v0 formatter route.
+### 5.9 Result retrieval
 
 | Item | Value |
 | --- | --- |
-| Method/path | `POST /api/v0/format-markdown` |
-| Body | `{"url": "<non-empty URL string>"}` |
-| Python | `format_markdown(url) -> str` |
-| JavaScript | `formatMarkdown(url) -> Promise<string>` |
+| Method/path | `GET /workflows/runs/{id}/result` |
+| Python | `get_run_result(run_id)` |
+| JavaScript | `getRunResult(runId)` |
 
-This endpoint is explicitly pinned to `v0`; changing the client's configured
-API version MUST NOT change its path. A successful non-text response is a
-transport-contract error.
+The gateway either streams the stored payload directly or answers `303 See
+Other` with a presigned object-storage URL. Implementations MUST NOT let the
+HTTP client follow this redirect automatically, because the `Api-Key` header
+would be forwarded to a third-party host. They MUST instead issue an
+unauthenticated request to the `Location` target. A `303` without a `Location`
+raises `MakraStreamError`.
 
-## 6. Response decoding
+### 5.10 Retries and idempotency
+
+Implementations MUST retry only on statuses `408`, `409`, `425`, `429`, `500`,
+`502`, `503`, and `504`, and on transport failures, up to `max_retries`.
+
+`409` MUST NOT be retried when the structured error code is
+`idempotency_key_reuse` or `run_not_terminal`; those are genuine conflicts, not
+races.
+
+The delay MUST be `Retry-After` when the server supplies it, otherwise
+exponential backoff with full jitter, capped at the backoff ceiling in §3.1.
+
+Every workflow submission MUST carry an `Idempotency-Key`. Without it a retried
+`POST` could start — and bill — a second run. Implementations MUST generate one
+per submission when the caller does not supply it.
+
+## 6. Workflow `config`
+
+`config` is a nested JSON object. Deployment policy supplies defaults; callers
+override only the keys they set. Unknown keys are rejected by the server.
+Clients MUST preserve caller-supplied keys and MUST NOT invent alternate names.
+
+### 6.1 Common config (extract and schema)
+
+These keys MAY appear on both `extract` and `schema` requests:
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "selector_chain_version": "v2"
+  },
+  "crawler": {
+    "post_ready_wait_ms": null,
+    "proxy": {
+      "region": {
+        "scope": "worldwide",
+        "value": null
+      }
+    },
+    "recovery": {
+      "one_last_retry": true,
+      "one_last_retry_delay_ms": null
+    }
+  }
+}
+```
+
+| Path | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `memory.enabled` | boolean | `true` | Use stored extraction strategies |
+| `memory.selector_chain_version` | string | `"v2"` | Allowed: `"v1"`, `"v2"` |
+| `crawler.post_ready_wait_ms` | integer \| null | `null` | `0`–`120000`; `null` uses deployment default |
+| `crawler.proxy.region.scope` | string | `"worldwide"` | Allowed: `"worldwide"`, `"continent"`, `"country"` |
+| `crawler.proxy.region.value` | string \| null | `null` | `null` for worldwide; continent slug; ISO alpha-2 country code |
+| `crawler.recovery.one_last_retry` | boolean | `true` | One final fresh-session retry |
+| `crawler.recovery.one_last_retry_delay_ms` | integer \| null | `null` | `0`–`300000`; `null` uses deployment default |
+
+Proxy mode and credentials are deployment policy. Callers only select the exit
+region.
+
+### 6.2 Extract-only config
+
+These keys are valid only on `extract` requests:
+
+```json
+{
+  "validation_mode": "repair",
+  "audit": {
+    "enabled": false,
+    "use_cache": true
+  },
+  "pagination": {
+    "enabled": false,
+    "additional_pages": 0
+  },
+  "title": {
+    "enabled": true
+  }
+}
+```
+
+| Path | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `validation_mode` | string \| null | `"repair"` | Allowed: `"observe"`, `"repair"`, `null` |
+| `audit.enabled` | boolean | `false` | Development only |
+| `audit.use_cache` | boolean | `true` | Replay cached audit artifacts when available |
+| `pagination.enabled` | boolean | `false` | Follow next-page controls |
+| `pagination.additional_pages` | integer | `0` | Must be `>= 0`; pages beyond the origin URL |
+| `title.enabled` | boolean | deployment default | Generate a human-readable run title |
+
+### 6.3 Schema-only config
+
+Beyond the common keys in §6.1, `schema` requests have no additional public
+config keys in version 0.1. Top-level `only_memoized` remains a request field,
+not a `config` key.
+
+### 6.4 Language typing
+
+Python SHOULD expose `TypedDict` helpers (`CommonConfig`, `ExtractConfig`,
+`SchemaConfig`) documenting the shapes above. JavaScript MUST declare matching
+interfaces. Implementations MAY perform light client-side validation of enums
+and ranges, but MUST still fail before network I/O for empty URLs and empty
+schemas.
+
+## 7. Response decoding
 
 Clients MUST preserve the complete successful server response.
 
@@ -285,11 +541,39 @@ Clients MUST preserve the complete successful server response.
 
 Version 0.1 does not unwrap a `{ success, data, ... }` envelope.
 
-## 7. Errors
+## 8. Errors
 
-### 7.1 Hierarchy
+### 8.1 Hierarchy
 
-`MakraError` is the base SDK error.
+`MakraError` is the base SDK error. Implementations MUST provide this exact
+tree so that catching a parent keeps working when a new leaf is added:
+
+```
+MakraError
+├── MakraAPIError                      HTTP 4xx/5xx
+│   ├── MakraAuthenticationError       401
+│   ├── MakraInsufficientCreditsError  402
+│   ├── MakraPermissionError           403
+│   ├── MakraNotFoundError             404
+│   ├── MakraRateLimitError            429, or code too_many_concurrent_runs
+│   ├── MakraServerError               5xx
+│   └── MakraInvalidRequestError       any other 4xx
+├── MakraConnectionError               never reached the API
+│   └── MakraTimeoutError
+├── MakraStreamError                   stream ended before a terminal event
+└── MakraRunFailedError                run terminal in a non-completed state
+```
+
+Subclass-specific attributes, read from the structured `error` object when
+present:
+
+| Error | Python | JavaScript |
+| --- | --- | --- |
+| `MakraInvalidRequestError` | `field`, `reason`, `index` | `field`, `reason`, `index` |
+| `MakraInsufficientCreditsError` | `required_credits`, `available_credits` | `requiredCredits`, `availableCredits` |
+| `MakraRateLimitError` | `retry_after`, `concurrency` | `retryAfter`, `concurrency` |
+| `MakraStreamError` | `run_id` | `runId` |
+| `MakraRunFailedError` | `run_id`, `state`, `run` | `runId`, `state`, `run` |
 
 `MakraAPIError` represents an HTTP error response and MUST expose:
 
@@ -300,24 +584,34 @@ Version 0.1 does not unwrap a `{ success, data, ... }` envelope.
 | request method | `method` | `method` |
 | request path | `path` | `path` |
 | optional request ID | `request_id` | `requestId` |
+| structured error code | `code` | `code` |
 | readable message | `message` | `message` |
 
-The message MUST select the first non-empty string from JSON fields `message`,
-`detail`, and `error`; then a non-empty text body; then
+The message MUST select, in order: `error.message` from the structured
+envelope; then the first non-empty string among the top-level JSON fields
+`message`, `detail`, and `error`; then a non-empty text body; then
 `Makra API returned HTTP <status>`.
+
+`code` MUST be `error.code` when the structured envelope is present, and absent
+otherwise. Implementations MUST NOT branch on message text.
 
 `MakraConnectionError` represents DNS, connection, timeout, abort, or response
 contract failures. It MUST expose the request method and path when known, and
 MUST retain the original exception as the Python exception cause or JavaScript
 `cause`.
 
-### 7.2 Client validation
+### 8.2 Client validation
 
 Invalid constructor or operation arguments MUST fail before network I/O.
-Python uses `ValueError`; JavaScript uses `TypeError` (surfaced as a rejected
-operation Promise). Validation errors are not `MakraAPIError`.
+Python uses `ValueError`; JavaScript uses `TypeError` for wrong shapes and
+`RangeError` for out-of-range values. Validation errors are not `MakraAPIError`
+and MUST NOT be retried.
 
-## 8. Cross-language parity
+Validation MUST cover the constraints the API itself enforces — non-empty URL
+lists and schemas, enum membership, integer ranges — and MUST NOT invent
+constraints of its own.
+
+## 9. Cross-language parity
 
 The two implementations MUST have equivalent observable behavior. Idiomatic
 naming differences are intentional:
@@ -325,36 +619,72 @@ naming differences are intentional:
 | Python | JavaScript |
 | --- | --- |
 | `base_url` | `baseUrl` |
-| `api_version` | `apiVersion` |
-| `output_schema` | `outputSchema` |
-| `page_schema` | `pageSchema` |
-| `format_markdown` | `formatMarkdown` |
+| `execution_mode` | `executionMode` |
+| `only_memoized` | `onlyMemoized` |
 | `status_code` | `statusCode` |
 | `request_id` | `requestId` |
+| `idempotency_key` | `idempotencyKey` |
+| `last_event_id` | `lastEventId` |
+| `max_retries` | `maxRetries` |
+| `stream_idle_timeout` | `streamIdleTimeout` |
+| `extract_stream` | `extractStream` |
+| `submit_extract` | `submitExtract` |
+| `wait_for_run` | `waitForRun` |
+| `is_terminal` | `isTerminal` |
+| `run_id` | `runId` |
+
+Two differences are deliberate and MUST NOT be "fixed":
+
+- Python takes required operation arguments positionally (`extract(urls,
+  schema, ...)`); JavaScript takes a single options object
+  (`extract({ urls, schema })`). Each is the idiom of its ecosystem.
+- Durations use each language's conventional unit (§3.1).
+
+Wire JSON for workflow bodies and nested `config` keys uses the snake_case
+names in §5–§6 for both languages. Response objects are passed through with
+their wire keys unchanged, so `run.state` and `run.poll_after_ms` read the same
+in both languages.
 
 New operations MUST be specified once in this document with an explicit
 language-to-wire mapping, then implemented and released in both packages.
 
-## 9. Acceptance cases
+## 10. Acceptance cases
 
 Generated or hand-written implementations MUST verify these public seams:
 
-1. `base_url="http://localhost:6900/"` plus `ping()` requests exactly
-   `http://localhost:6900/ping`.
-2. `api_key="test-key"` sends `Authorization: Bearer test-key`.
-3. `extract` maps idiomatic schema names to `output_schema` and supplies empty
-   defaults.
-4. Markdown content with `text/markdown` is returned unchanged as text.
+1. `base_url="http://localhost:8080/"` plus `ping()` requests exactly
+   `http://localhost:8080/healthz`.
+2. `api_key="test-key"` sends `Api-Key: test-key`.
+3. `extract` maps to `POST /workflows/extract` with `schema` and empty
+   `config` defaults.
+4. `schema` maps to `POST /workflows/schema` with `url` and
+   `only_memoized`.
 5. `422 {"detail":"Invalid URL"}` becomes `MakraAPIError` with status 422,
    message `Invalid URL`, the full body, method, and path.
-6. An empty URL list fails without making an HTTP request.
+6. An empty URL list / empty schema fails without making an HTTP request.
 7. Missing API-key configuration still sends the documented dummy key.
 8. Explicit configuration overrides environment variables.
+9. A submission that fails twice with `503` succeeds on the third attempt, and
+   all three requests carry the same `Idempotency-Key`.
+10. A `409` with code `idempotency_key_reuse` is not retried.
+11. A streaming submission yields each event once and stops after the terminal
+    event.
+12. A stream that drops mid-run resumes with `GET /workflows/runs/{id}/events`
+    and `Last-Event-ID` set to the last delivered sequence.
+13. A stream that never terminates within the retry budget raises
+    `MakraStreamError` carrying the run id.
+14. `303` result retrieval fetches the `Location` target **without** the
+    `Api-Key` header.
+15. A caller-supplied cancellation signal propagates unchanged and is not
+    reported as a timeout.
 
 Tests SHOULD observe requests through a local isolated HTTP fixture or a public
 transport seam and MUST NOT depend on the production service.
 
-## 10. Repository layout and playground
+## 11. Repository layout and playground
+
+Both packages are organised around the same seven concerns, one module each, so
+a change to the HTTP surface has exactly one home in either language.
 
 ```text
 sdk/
@@ -362,10 +692,33 @@ sdk/
   python/
     pyproject.toml
     src/makra/
+      __init__.py     public surface
+      _constants.py   URLs, headers, enums, defaults
+      _config.py      settings resolution
+      _errors.py      error hierarchy and HTTP mapping
+      _requests.py    validation and payload building
+      _retry.py       retryable statuses and backoff
+      _response.py    body decoding
+      _sse.py         SSE framing
+      _events.py      WorkflowEvent
+      _runs.py        run handles
+      _client.py      Makra / AsyncMakra
     tests/
   javascript/
     package.json
     src/
+      index.js        public surface
+      index.d.ts      TypeScript declarations
+      constants.js    URLs, headers, enums, defaults
+      config.js       settings resolution
+      errors.js       error hierarchy and HTTP mapping
+      requests.js     validation and payload building
+      retry.js        retryable statuses and backoff
+      response.js     body decoding and deadlines
+      sse.js          SSE framing
+      events.js       WorkflowEvent
+      runs.js         run handles
+      client.js       Makra
     test/
 playground/
   python.py
@@ -373,11 +726,14 @@ playground/
   README.md
 ```
 
-Playground scripts MUST default to `http://localhost:6900`, MUST send a dummy
+Neither package may take a runtime dependency beyond `httpx` (Python) and the
+platform `fetch` (JavaScript).
+
+Playground scripts MUST default to `http://localhost:8080`, MUST send a dummy
 key unless `MAKRA_API_KEY` is set, and MUST allow `MAKRA_BASE_URL` to override
 the development URL. They are examples, not registry package contents.
 
-## 11. Release requirements
+## 12. Release requirements
 
 Before publishing either package:
 

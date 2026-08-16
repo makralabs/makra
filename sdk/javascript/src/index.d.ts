@@ -1,34 +1,188 @@
-export type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
-export interface JsonObject {
-  [key: string]: JsonValue;
+/** Type declarations for the Makra JavaScript SDK. */
+
+export declare const SDK_VERSION: string;
+export declare const PRODUCTION_BASE_URL: string;
+export declare const DEVELOPMENT_BASE_URL: string;
+export declare const DUMMY_API_KEY: string;
+export declare const DEFAULT_TIMEOUT_MS: number;
+export declare const DEFAULT_MAX_RETRIES: number;
+
+// --- Wire enums --------------------------------------------------------------
+
+export type ExecutionMode = "concurrent" | "sequential";
+export type ValidationMode = "observe" | "repair";
+export type SelectorChainVersion = "v1" | "v2";
+export type ProxyRegionScope = "worldwide" | "continent" | "country";
+export type Feature = "extract" | "schema";
+export type RunState =
+  | "queued"
+  | "running"
+  | "cancel_requested"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "budget_exhausted";
+
+export declare const ExecutionModes: {
+  readonly CONCURRENT: "concurrent";
+  readonly SEQUENTIAL: "sequential";
+};
+export declare const ValidationModes: {
+  readonly OBSERVE: "observe";
+  readonly REPAIR: "repair";
+};
+export declare const SelectorChainVersions: { readonly V1: "v1"; readonly V2: "v2" };
+export declare const ProxyRegionScopes: {
+  readonly WORLDWIDE: "worldwide";
+  readonly CONTINENT: "continent";
+  readonly COUNTRY: "country";
+};
+export declare const Features: { readonly EXTRACT: "extract"; readonly SCHEMA: "schema" };
+export declare const RunStates: Readonly<Record<string, RunState>>;
+export declare const EventTypes: Readonly<Record<string, string>>;
+export declare const ErrorCodes: Readonly<Record<string, string>>;
+
+// --- Request configuration ---------------------------------------------------
+
+export interface ProxyRegionConfig {
+  scope?: ProxyRegionScope | null;
+  value?: string | null;
 }
 
-export interface MakraOptions {
-  apiKey?: string;
-  baseUrl?: string;
-  apiVersion?: string;
-  timeout?: number;
+export interface ProxyConfig {
+  region?: ProxyRegionConfig | null;
 }
 
-export interface ExtractOptions {
-  urls: string[];
-  outputSchema: JsonObject | JsonValue[];
-  actions?: string[];
-  config?: JsonObject;
+export interface CrawlerRecoveryConfig {
+  one_last_retry?: boolean | null;
+  /** 0–300000 ms. */
+  one_last_retry_delay_ms?: number | null;
 }
 
-export interface PreprocessOptions {
-  urls: string[];
-  options?: JsonObject;
+export interface CrawlerConfig {
+  /** 0–120000 ms. */
+  post_ready_wait_ms?: number | null;
+  recovery?: CrawlerRecoveryConfig | null;
+  proxy?: ProxyConfig | null;
 }
 
-export interface PageSchemaOptions {
-  urls: string[];
-  outputType?: "json" | "text";
-  debugMode?: boolean;
-  debugOutputType?: string;
+export interface MemoryConfig {
+  enabled?: boolean | null;
+  selector_chain_version?: SelectorChainVersion | null;
 }
+
+export interface AuditConfig {
+  enabled?: boolean | null;
+  use_cache?: boolean | null;
+}
+
+export interface PaginationConfig {
+  enabled?: boolean | null;
+  additional_pages?: number | null;
+}
+
+export interface TitleConfig {
+  enabled?: boolean | null;
+}
+
+export interface CommonConfig {
+  memory?: MemoryConfig | null;
+  crawler?: CrawlerConfig | null;
+}
+
+export interface ExtractConfig extends CommonConfig {
+  validation_mode?: ValidationMode | null;
+  audit?: AuditConfig | null;
+  pagination?: PaginationConfig | null;
+  title?: TitleConfig | null;
+}
+
+export type SchemaConfig = CommonConfig;
+
+export type JsonSchema = Record<string, unknown> | unknown[];
+
+// --- Responses ---------------------------------------------------------------
+
+export interface ResultSummary {
+  available?: boolean;
+  size_bytes?: number;
+  content_type?: string;
+  expires_at?: string;
+  [key: string]: unknown;
+}
+
+export interface RunProgress {
+  pages_total?: number;
+  pages_completed?: number;
+  [key: string]: unknown;
+}
+
+export interface RunView {
+  run_id: string;
+  feature?: Feature;
+  state?: RunState;
+  created_at?: string;
+  updated_at?: string;
+  terminal_reason?: string;
+  failure_code?: string;
+  progress?: RunProgress;
+  result?: ResultSummary;
+  poll_after_ms?: number;
+  [key: string]: unknown;
+}
+
+export interface RunPage {
+  items?: RunView[];
+  next_cursor?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AsyncAdmission {
+  run_id: string;
+  feature?: Feature;
+  state?: RunState;
+  status_url?: string;
+  events_url?: string;
+  result_url?: string;
+  [key: string]: unknown;
+}
+
+// --- Events ------------------------------------------------------------------
+
+export interface ServerSentEventMessage {
+  event: string;
+  data: string;
+  id?: string;
+  retry?: number;
+}
+
+export declare class SSEDecoder {
+  lastEventId?: string;
+  feed(line: string): ServerSentEventMessage | null;
+}
+
+export declare class WorkflowEvent {
+  readonly type: string;
+  readonly sequence: number;
+  readonly payload: Record<string, unknown>;
+  readonly runId?: string;
+  /** Whether this event closes the stream. */
+  readonly isTerminal: boolean;
+  /** The fine-grained step name, e.g. `run.title_generated`. */
+  readonly detailType?: string;
+  readonly status?: string;
+  readonly reason?: string;
+  /** Domain success on a terminal event; `undefined` before the run ends. */
+  readonly success?: boolean;
+}
+
+export declare function parseEvent(
+  message: ServerSentEventMessage,
+  runId?: string,
+): WorkflowEvent;
+export declare function terminalState(event: WorkflowEvent): RunState;
+
+// --- Errors ------------------------------------------------------------------
 
 export declare class MakraError extends Error {}
 
@@ -37,29 +191,173 @@ export declare class MakraAPIError extends MakraError {
   readonly body: unknown;
   readonly method: string;
   readonly path: string;
+  readonly code?: string;
   readonly requestId?: string;
 }
 
+export declare class MakraAuthenticationError extends MakraAPIError {}
+export declare class MakraPermissionError extends MakraAPIError {}
+export declare class MakraNotFoundError extends MakraAPIError {}
+export declare class MakraServerError extends MakraAPIError {}
+
+export declare class MakraInvalidRequestError extends MakraAPIError {
+  readonly field?: string;
+  readonly reason?: string;
+  readonly index?: number;
+}
+
+export declare class MakraInsufficientCreditsError extends MakraAPIError {
+  readonly requiredCredits?: number;
+  readonly availableCredits?: number;
+}
+
+export declare class MakraRateLimitError extends MakraAPIError {
+  /** Seconds, from the `Retry-After` header. */
+  readonly retryAfter?: number;
+  readonly concurrency?: Record<string, unknown>;
+}
+
 export declare class MakraConnectionError extends MakraError {
-  readonly method?: string;
-  readonly path?: string;
-  readonly cause?: Error;
+  readonly method: string;
+  readonly path: string;
+}
+
+export declare class MakraTimeoutError extends MakraConnectionError {}
+
+export declare class MakraStreamError extends MakraError {
+  readonly runId?: string;
+}
+
+export declare class MakraRunFailedError extends MakraError {
+  readonly runId: string;
+  readonly state: RunState;
+  readonly run: RunView;
+}
+
+// --- Configuration -----------------------------------------------------------
+
+export interface MakraOptions {
+  /** Falls back to `MAKRA_API_KEY`. */
+  apiKey?: string;
+  /** Falls back to `MAKRA_BASE_URL`, then to the production gateway. */
+  baseUrl?: string;
+  /** Milliseconds. Falls back to `MAKRA_TIMEOUT` (seconds), then 300000. */
+  timeout?: number;
+  /** Milliseconds of silence that mark an event stream as dead. Default 90000. */
+  streamIdleTimeout?: number;
+  /** Falls back to `MAKRA_MAX_RETRIES`, then 2. */
+  maxRetries?: number;
+  /** Base backoff in milliseconds. Default 500. */
+  retryBackoff?: number;
+  defaultHeaders?: Record<string, string>;
+  env?: Record<string, string | undefined>;
+}
+
+export interface ResolvedConfig {
+  readonly apiKey: string;
+  readonly baseUrl: string;
+  readonly timeout: number;
+  readonly streamIdleTimeout: number;
+  readonly maxRetries: number;
+  readonly retryBackoff: number;
+  readonly defaultHeaders: Record<string, string>;
+  headers(): Record<string, string>;
+  url(path: string): string;
+}
+
+export declare function resolveConfig(options?: MakraOptions): ResolvedConfig;
+
+// --- Operations --------------------------------------------------------------
+
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
+export interface ExtractOptions extends RequestOptions {
+  urls: string[];
+  schema: JsonSchema;
+  /** Default `"concurrent"`. */
+  executionMode?: ExecutionMode;
+  config?: ExtractConfig;
+  /** Supply your own to make a submission replayable across processes. */
+  idempotencyKey?: string;
+  /** Milliseconds; overrides the client timeout for this call. */
+  timeout?: number;
+}
+
+export interface SchemaOptions extends RequestOptions {
+  url: string;
+  /** Return only an already-memoized schema instead of building one. */
+  onlyMemoized?: boolean;
+  config?: SchemaConfig;
+  idempotencyKey?: string;
+  timeout?: number;
+}
+
+export type ExtractStreamOptions = Omit<ExtractOptions, "timeout">;
+export type SchemaStreamOptions = Omit<SchemaOptions, "timeout">;
+
+export interface WaitOptions extends RequestOptions {
+  /** Milliseconds to keep polling before giving up. */
+  timeout?: number;
+  /** Minimum milliseconds between polls. */
+  pollInterval?: number;
+  /** Throw `MakraRunFailedError` on a non-`completed` terminal state. */
+  throwOnFailure?: boolean;
+}
+
+export interface ListRunsOptions extends RequestOptions {
+  limit?: number;
+  cursor?: string;
+  feature?: Feature;
+  state?: RunState;
+}
+
+export interface StreamRunOptions extends RequestOptions {
+  lastEventId?: number;
+}
+
+/** A submitted run, observable without holding the original connection. */
+export declare class RunHandle {
+  readonly id: string;
+  readonly feature?: Feature;
+  state?: RunState;
+  readonly statusUrl?: string;
+  readonly eventsUrl?: string;
+  readonly resultUrl?: string;
+  readonly admission: AsyncAdmission;
+  readonly client: Makra;
+
+  refresh(): Promise<RunView>;
+  wait(options?: WaitOptions): Promise<RunView>;
+  stream(options?: StreamRunOptions): AsyncGenerator<WorkflowEvent>;
+  result(): Promise<unknown>;
+  cancel(): Promise<RunView>;
 }
 
 export declare class Makra {
+  constructor(options?: MakraOptions);
+
+  readonly config: ResolvedConfig;
   readonly apiKey: string;
   readonly baseUrl: string;
-  readonly apiVersion: string;
-  readonly timeout: number;
 
-  constructor(options?: MakraOptions);
-  ping(): Promise<unknown>;
+  ping(options?: RequestOptions): Promise<unknown>;
+  ready(options?: RequestOptions): Promise<unknown>;
+
   extract(options: ExtractOptions): Promise<unknown>;
-  preprocess(options: PreprocessOptions): Promise<unknown>;
-  pageSchema(options: PageSchemaOptions): Promise<unknown>;
-  formatMarkdown(url: string): Promise<string>;
-}
+  schema(options: SchemaOptions): Promise<unknown>;
 
-export declare const PRODUCTION_BASE_URL = "https://api.makralabs.org";
-export declare const DEVELOPMENT_BASE_URL = "http://localhost:6900";
-export declare const DUMMY_API_KEY = "makra-development-key";
+  extractStream(options: ExtractStreamOptions): AsyncGenerator<WorkflowEvent>;
+  schemaStream(options: SchemaStreamOptions): AsyncGenerator<WorkflowEvent>;
+  streamRunEvents(runId: string, options?: StreamRunOptions): AsyncGenerator<WorkflowEvent>;
+
+  submitExtract(options: ExtractStreamOptions): Promise<RunHandle>;
+  submitSchema(options: SchemaStreamOptions): Promise<RunHandle>;
+
+  getRun(runId: string, options?: RequestOptions): Promise<RunView>;
+  listRuns(options?: ListRunsOptions): Promise<RunPage>;
+  cancelRun(runId: string, options?: RequestOptions): Promise<RunView>;
+  waitForRun(runId: string, options?: WaitOptions): Promise<RunView>;
+  getRunResult(runId: string, options?: RequestOptions): Promise<unknown>;
+}

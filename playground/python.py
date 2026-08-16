@@ -24,9 +24,13 @@ def main() -> None:
         if args.url:
             result = client.extract(
                 urls=[args.url],
-                output_schema={
+                schema={
                     "title": "The page title",
                     "description": "A short description of the page",
+                },
+                config={
+                    "validation_mode": "repair",
+                    "memory": {"enabled": True, "selector_chain_version": "v2"},
                 },
             )
             print("extract:", json.dumps(result, indent=2))

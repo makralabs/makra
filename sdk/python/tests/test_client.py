@@ -10,7 +10,6 @@ from makra import (
     DUMMY_API_KEY,
     Makra,
     MakraAPIError,
-    MakraConnectionError,
 )
 
 
@@ -19,26 +18,15 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._record_request()
-        self._send_json(200, {"message": "pong"})
+        self._send_json(200, {"status": "ok"})
 
     def do_POST(self):
-        request = self._record_request()
-        if self.path == "/api/v1/extract":
+        self._record_request()
+        if self.path == "/workflows/extract":
             self._send_json(200, {"success": True, "data": {"title": "Makra"}})
             return
-        if self.path == "/api/v1/preprocess":
+        if self.path == "/workflows/schema":
             self._send_json(422, {"detail": "Invalid URL"})
-            return
-        if self.path == "/api/v0/format-markdown":
-            if request["body"]["url"] == "https://json.example":
-                self._send_json(200, "not markdown")
-                return
-            body = b"# Makra"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/markdown")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
             return
         self._send_json(404, {"detail": "Not found"})
 
@@ -79,65 +67,89 @@ def api_server():
         thread.join()
 
 
-def test_ping_uses_root_route_and_sends_bearer_api_key(api_server):
+def test_ping_uses_healthz_and_sends_api_key(api_server):
     with Makra(api_key="test-key", base_url=f"{api_server}/") as client:
-        assert client.ping() == {"message": "pong"}
+        assert client.ping() == {"status": "ok"}
 
     request = _RequestHandler.requests[0]
-    assert request["path"] == "/ping"
-    assert request["headers"]["Authorization"] == "Bearer test-key"
+    assert request["path"] == "/healthz"
+    assert request["headers"]["Api-Key"] == "test-key"
 
 
-def test_extract_sends_the_v1_wire_payload(api_server):
+def test_extract_sends_the_workflow_wire_payload(api_server):
     with Makra(api_key="test-key", base_url=api_server) as client:
         result = client.extract(
             urls=["https://example.com"],
-            output_schema={"title": "Title of the page"},
-            actions=["pagination"],
-            config={"use_cache": True},
+            schema={"title": "Title of the page"},
+            execution_mode="sequential",
+            config={
+                "validation_mode": "repair",
+                "memory": {"enabled": True, "selector_chain_version": "v2"},
+                "pagination": {"enabled": True, "additional_pages": 2},
+                "crawler": {
+                    "post_ready_wait_ms": 1000,
+                    "proxy": {"region": {"scope": "country", "value": "DE"}},
+                    "recovery": {
+                        "one_last_retry": True,
+                        "one_last_retry_delay_ms": None,
+                    },
+                },
+                "audit": {"enabled": False, "use_cache": True},
+            },
         )
 
     assert result == {"success": True, "data": {"title": "Makra"}}
     request = _RequestHandler.requests[0]
-    assert request["path"] == "/api/v1/extract"
+    assert request["path"] == "/workflows/extract"
     assert request["body"] == {
         "urls": ["https://example.com"],
-        "output_schema": {"title": "Title of the page"},
-        "actions": ["pagination"],
-        "config": {"use_cache": True},
+        "schema": {"title": "Title of the page"},
+        "execution_mode": "sequential",
+        "config": {
+            "validation_mode": "repair",
+            "memory": {"enabled": True, "selector_chain_version": "v2"},
+            "pagination": {"enabled": True, "additional_pages": 2},
+            "crawler": {
+                "post_ready_wait_ms": 1000,
+                "proxy": {"region": {"scope": "country", "value": "DE"}},
+                "recovery": {
+                    "one_last_retry": True,
+                    "one_last_retry_delay_ms": None,
+                },
+            },
+            "audit": {"enabled": False, "use_cache": True},
+        },
     }
 
 
-def test_text_response_is_returned_as_text(api_server):
-    with Makra(api_key="test-key", base_url=api_server) as client:
-        result = client.format_markdown("https://example.com")
-
-    assert result == "# Makra"
-
-
-def test_markdown_rejects_a_non_text_content_type(api_server):
-    with Makra(api_key="test-key", base_url=api_server) as client:
-        with pytest.raises(MakraConnectionError, match="Expected a text/ response"):
-            client.format_markdown("https://json.example")
-
-
-def test_http_error_exposes_status_body_and_request_context(api_server):
+def test_schema_sends_the_workflow_wire_payload(api_server):
     with Makra(api_key="test-key", base_url=api_server) as client:
         with pytest.raises(MakraAPIError) as captured:
-            client.preprocess(["https://invalid.example"])
+            client.schema(
+                "https://invalid.example",
+                only_memoized=True,
+                config={"memory": {"enabled": False}},
+            )
 
     error = captured.value
     assert error.status_code == 422
     assert error.message == "Invalid URL"
     assert error.body == {"detail": "Invalid URL"}
     assert error.method == "POST"
-    assert error.path == "/api/v1/preprocess"
+    assert error.path == "/workflows/schema"
+    assert _RequestHandler.requests[0]["body"] == {
+        "url": "https://invalid.example",
+        "only_memoized": True,
+        "config": {"memory": {"enabled": False}},
+    }
 
 
 def test_client_side_validation_happens_before_network_io(api_server):
     with Makra(api_key="test-key", base_url=api_server) as client:
         with pytest.raises(ValueError, match="urls must contain at least one URL"):
-            client.extract(urls=[], output_schema={"title": "Title"})
+            client.extract(urls=[], schema={"title": "Title"})
+        with pytest.raises(ValueError, match="schema must be a non-empty"):
+            client.extract(urls=["https://example.com"], schema={})
 
     assert _RequestHandler.requests == []
 
@@ -153,9 +165,7 @@ def test_missing_api_key_sends_dummy_key(api_server, monkeypatch):
     with Makra(base_url=api_server) as client:
         client.ping()
 
-    assert _RequestHandler.requests[0]["headers"]["Authorization"] == (
-        f"Bearer {DUMMY_API_KEY}"
-    )
+    assert _RequestHandler.requests[0]["headers"]["Api-Key"] == DUMMY_API_KEY
 
 
 def test_explicit_configuration_overrides_environment(api_server, monkeypatch):
@@ -165,9 +175,7 @@ def test_explicit_configuration_overrides_environment(api_server, monkeypatch):
     with Makra(api_key="explicit-key", base_url=api_server) as client:
         client.ping()
 
-    assert _RequestHandler.requests[0]["headers"]["Authorization"] == (
-        "Bearer explicit-key"
-    )
+    assert _RequestHandler.requests[0]["headers"]["Api-Key"] == "explicit-key"
 
 
 def test_async_client_has_the_same_ping_contract(api_server):
@@ -175,4 +183,4 @@ def test_async_client_has_the_same_ping_contract(api_server):
         async with AsyncMakra(api_key="test-key", base_url=api_server) as client:
             return await client.ping()
 
-    assert asyncio.run(ping()) == {"message": "pong"}
+    assert asyncio.run(ping()) == {"status": "ok"}

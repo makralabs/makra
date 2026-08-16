@@ -1,7 +1,8 @@
 # Makra SDK playground
 
-These scripts use `http://localhost:6900` and the documented dummy API key by
-default. Override either with `MAKRA_BASE_URL` or `MAKRA_API_KEY`.
+These scripts use `http://localhost:8080` (local public API gateway) and the
+documented dummy API key by default. Override either with `MAKRA_BASE_URL` or
+`MAKRA_API_KEY`.
 
 Install the local Python package once:
 
