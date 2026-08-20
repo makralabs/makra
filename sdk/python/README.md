@@ -44,16 +44,36 @@ Pick by how long the work takes and how much you want to watch it happen.
 ### 1. REST
 
 The connection is held until the run finishes, so `timeout` is really "how
-long may this workflow take". It defaults to 300 seconds.
+long may this workflow take". It defaults to 300 seconds **per origin page**.
+Paginated extracts (`pagination.additional_pages`) and sequential multi-URL
+extracts scale that budget automatically unless you pass `timeout` yourself.
 
 ```python
+from makra import (
+    EventTypes,
+    Iso3166Alpha2,
+    Makra,
+    ProxyContinents,
+    ProxyRegionScopes,
+    StreamDetailTypes,
+    ValidationModes,
+)
+
 data = client.extract(
     urls=["https://example.com/products"],
     schema={"products": [{"name": "string", "price": "number"}]},
     config={
-        "validation_mode": "repair",
-        "memory": {"enabled": True, "selector_chain_version": "v2"},
+        "validation_mode": ValidationModes.REPAIR,
         "pagination": {"enabled": True, "additional_pages": 2},
+        "crawler": {
+            "proxy": {
+                "region": {
+                    "scope": ProxyRegionScopes.COUNTRY,
+                    "value": Iso3166Alpha2.DE,
+                }
+            },
+            "recovery": {"retry": True, "retry_delay_ms": 2000},
+        },
     },
     timeout=120,
 )
@@ -64,7 +84,16 @@ Discover what a page contains before you write a schema:
 ```python
 page_schema = client.schema(
     "https://example.com/products",
-    config={"crawler": {"proxy": {"region": {"scope": "country", "value": "DE"}}}},
+    config={
+        "crawler": {
+            "proxy": {
+                "region": {
+                    "scope": ProxyRegionScopes.CONTINENT,
+                    "value": ProxyContinents.EUROPE,
+                }
+            }
+        }
+    },
 )
 ```
 
@@ -78,6 +107,9 @@ run_id = None
 for event in client.extract_stream(urls=urls, schema=schema):
     run_id = event.run_id
     print(event.sequence, event.type, event.detail_type)
+    if event.type == EventTypes.STEP_PROGRESS:
+        if event.detail_type == StreamDetailTypes.RUN_TITLE_GENERATED:
+            print("title:", event.payload.get("title"))
     if event.is_terminal:
         print("finished:", event.status, event.reason)
 
@@ -86,6 +118,8 @@ data = client.get_run_result(run_id)
 
 Each `WorkflowEvent` exposes `type`, `sequence`, `run_id`, the raw `payload`,
 and the shortcuts `is_terminal`, `detail_type`, `status`, `reason`, `success`.
+Compare `event.type` to `EventTypes` and `event.detail_type` to
+`StreamDetailTypes`.
 
 If the connection drops mid-run, the SDK reconnects to the run's event
 endpoint with `Last-Event-ID`, so you see every event exactly once. Silence
@@ -122,7 +156,7 @@ Settings resolve as **explicit argument → environment variable → default**.
 | --- | --- | --- |
 | `api_key` | `MAKRA_API_KEY` | `makra-development-key` |
 | `base_url` | `MAKRA_BASE_URL` | `https://api.makralabs.org` |
-| `timeout` | `MAKRA_TIMEOUT` (seconds) | `300` |
+| `timeout` | `MAKRA_TIMEOUT` (seconds) | `300` per origin page |
 | `max_retries` | `MAKRA_MAX_RETRIES` | `2` |
 | `connect_timeout` | — | `10` |
 | `stream_idle_timeout` | — | `90` |

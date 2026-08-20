@@ -11,8 +11,14 @@ export declare const DEFAULT_MAX_RETRIES: number;
 
 export type ExecutionMode = "concurrent" | "sequential";
 export type ValidationMode = "observe" | "repair";
-export type SelectorChainVersion = "v1" | "v2";
 export type ProxyRegionScope = "worldwide" | "continent" | "country";
+export type ProxyContinent =
+  | "africa"
+  | "asia"
+  | "europe"
+  | "north.america"
+  | "oceania"
+  | "south.america";
 export type Feature = "extract" | "schema";
 export type RunState =
   | "queued"
@@ -31,21 +37,69 @@ export declare const ValidationModes: {
   readonly OBSERVE: "observe";
   readonly REPAIR: "repair";
 };
-export declare const SelectorChainVersions: { readonly V1: "v1"; readonly V2: "v2" };
 export declare const ProxyRegionScopes: {
   readonly WORLDWIDE: "worldwide";
   readonly CONTINENT: "continent";
   readonly COUNTRY: "country";
 };
+export declare const ProxyContinents: {
+  readonly AFRICA: "africa";
+  readonly ASIA: "asia";
+  readonly EUROPE: "europe";
+  readonly NORTH_AMERICA: "north.america";
+  readonly OCEANIA: "oceania";
+  readonly SOUTH_AMERICA: "south.america";
+};
+/** ISO 3166-1 alpha-2 country codes. `Iso3166Alpha2.DE === "DE"`. */
+export declare const Iso3166Alpha2: Readonly<Record<string, string>>;
+export declare const ISO_3166_ALPHA2_CODES: readonly string[];
 export declare const Features: { readonly EXTRACT: "extract"; readonly SCHEMA: "schema" };
 export declare const RunStates: Readonly<Record<string, RunState>>;
-export declare const EventTypes: Readonly<Record<string, string>>;
+export declare const EventTypes: {
+  readonly RUN_STARTED: "workflow.run.started";
+  readonly RUN_HEARTBEAT: "workflow.run.heartbeat";
+  readonly STEP_STARTED: "workflow.step.started";
+  readonly STEP_PROGRESS: "workflow.step.progress";
+  readonly STEP_COMPLETED: "workflow.step.completed";
+  readonly RESULT_PARTIAL: "workflow.result.partial";
+  readonly DIAGNOSTIC: "workflow.diagnostic";
+  readonly RUN_COMPLETED: "workflow.run.completed";
+  readonly RUN_FAILED: "workflow.run.failed";
+  readonly RUN_CANCELLED: "workflow.run.cancelled";
+  readonly RUN_BUDGET_EXHAUSTED: "workflow.run.budget_exhausted";
+};
+export declare const StreamDetailTypes: {
+  readonly RUN_STARTED: "run.started";
+  readonly RUN_STATUS_CHANGED: "run.status_changed";
+  readonly RUN_COMPLETED: "run.completed";
+  readonly RUN_FAILED: "run.failed";
+  readonly RUN_CANCELLED: "run.cancelled";
+  readonly RUN_BUDGET_EXHAUSTED: "run.budget_exhausted";
+  readonly RUN_TITLE_GENERATED: "run.title_generated";
+  readonly STAGE_STARTED: "stage.started";
+  readonly STAGE_PROGRESS: "stage.progress";
+  readonly STAGE_COMPLETED: "stage.completed";
+  readonly STAGE_FAILED: "stage.failed";
+  readonly STAGE_SKIPPED: "stage.skipped";
+  readonly ACTIVITY_STARTED: "activity.started";
+  readonly ACTIVITY_UPDATED: "activity.updated";
+  readonly ACTIVITY_OUTPUT_DELTA: "activity.output_delta";
+  readonly ACTIVITY_COMPLETED: "activity.completed";
+  readonly ACTIVITY_FAILED: "activity.failed";
+  readonly MESSAGE_STARTED: "message.started";
+  readonly MESSAGE_DELTA: "message.delta";
+  readonly MESSAGE_COMPLETED: "message.completed";
+  readonly RESULT_PARTIAL: "result.partial";
+  readonly RESULT_COMPLETED: "result.completed";
+  readonly DIAGNOSTIC: "diagnostic";
+};
 export declare const ErrorCodes: Readonly<Record<string, string>>;
 
 // --- Request configuration ---------------------------------------------------
 
 export interface ProxyRegionConfig {
   scope?: ProxyRegionScope | null;
+  /** ISO 3166-1 alpha-2 when scope is country; a ProxyContinents slug when continent. */
   value?: string | null;
 }
 
@@ -54,9 +108,9 @@ export interface ProxyConfig {
 }
 
 export interface CrawlerRecoveryConfig {
-  one_last_retry?: boolean | null;
+  retry?: boolean | null;
   /** 0–300000 ms. */
-  one_last_retry_delay_ms?: number | null;
+  retry_delay_ms?: number | null;
 }
 
 export interface CrawlerConfig {
@@ -64,16 +118,6 @@ export interface CrawlerConfig {
   post_ready_wait_ms?: number | null;
   recovery?: CrawlerRecoveryConfig | null;
   proxy?: ProxyConfig | null;
-}
-
-export interface MemoryConfig {
-  enabled?: boolean | null;
-  selector_chain_version?: SelectorChainVersion | null;
-}
-
-export interface AuditConfig {
-  enabled?: boolean | null;
-  use_cache?: boolean | null;
 }
 
 export interface PaginationConfig {
@@ -86,13 +130,11 @@ export interface TitleConfig {
 }
 
 export interface CommonConfig {
-  memory?: MemoryConfig | null;
   crawler?: CrawlerConfig | null;
 }
 
 export interface ExtractConfig extends CommonConfig {
   validation_mode?: ValidationMode | null;
-  audit?: AuditConfig | null;
   pagination?: PaginationConfig | null;
   title?: TitleConfig | null;
 }
@@ -168,7 +210,7 @@ export declare class WorkflowEvent {
   readonly runId?: string;
   /** Whether this event closes the stream. */
   readonly isTerminal: boolean;
-  /** The fine-grained step name, e.g. `run.title_generated`. */
+  /** The fine-grained step name, e.g. `StreamDetailTypes.RUN_TITLE_GENERATED`. */
   readonly detailType?: string;
   readonly status?: string;
   readonly reason?: string;

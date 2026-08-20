@@ -84,17 +84,15 @@ def test_extract_sends_the_workflow_wire_payload(api_server):
             execution_mode="sequential",
             config={
                 "validation_mode": "repair",
-                "memory": {"enabled": True, "selector_chain_version": "v2"},
                 "pagination": {"enabled": True, "additional_pages": 2},
                 "crawler": {
                     "post_ready_wait_ms": 1000,
                     "proxy": {"region": {"scope": "country", "value": "DE"}},
                     "recovery": {
-                        "one_last_retry": True,
-                        "one_last_retry_delay_ms": None,
+                        "retry": True,
+                        "retry_delay_ms": None,
                     },
                 },
-                "audit": {"enabled": False, "use_cache": True},
             },
         )
 
@@ -107,7 +105,6 @@ def test_extract_sends_the_workflow_wire_payload(api_server):
         "execution_mode": "sequential",
         "config": {
             "validation_mode": "repair",
-            "memory": {"enabled": True, "selector_chain_version": "v2"},
             "pagination": {"enabled": True, "additional_pages": 2},
             "crawler": {
                 "post_ready_wait_ms": 1000,
@@ -117,7 +114,6 @@ def test_extract_sends_the_workflow_wire_payload(api_server):
                     "one_last_retry_delay_ms": None,
                 },
             },
-            "audit": {"enabled": False, "use_cache": True},
         },
     }
 
@@ -128,7 +124,7 @@ def test_schema_sends_the_workflow_wire_payload(api_server):
             client.schema(
                 "https://invalid.example",
                 only_memoized=True,
-                config={"memory": {"enabled": False}},
+                config={"crawler": {"post_ready_wait_ms": 0}},
             )
 
     error = captured.value
@@ -140,7 +136,7 @@ def test_schema_sends_the_workflow_wire_payload(api_server):
     assert _RequestHandler.requests[0]["body"] == {
         "url": "https://invalid.example",
         "only_memoized": True,
-        "config": {"memory": {"enabled": False}},
+        "config": {"crawler": {"post_ready_wait_ms": 0}},
     }
 
 
@@ -152,6 +148,52 @@ def test_client_side_validation_happens_before_network_io(api_server):
             client.extract(urls=["https://example.com"], schema={})
 
     assert _RequestHandler.requests == []
+
+
+def test_removed_config_keys_fail_before_network_io(api_server):
+    with Makra(api_key="test-key", base_url=api_server) as client:
+        with pytest.raises(ValueError, match="config.memory is not supported"):
+            client.extract(
+                urls=["https://example.com"],
+                schema={"title": "Title"},
+                config={"memory": {"enabled": True}},
+            )
+        with pytest.raises(ValueError, match="config.audit is not supported"):
+            client.extract(
+                urls=["https://example.com"],
+                schema={"title": "Title"},
+                config={"audit": {"enabled": True}},
+            )
+        with pytest.raises(ValueError, match="retry and retry_delay_ms"):
+            client.extract(
+                urls=["https://example.com"],
+                schema={"title": "Title"},
+                config={"crawler": {"recovery": {"one_last_retry": True}}},
+            )
+
+    assert _RequestHandler.requests == []
+
+
+def test_workflow_timeout_scales_with_pagination_and_sequential_urls():
+    from makra._requests import resolve_workflow_timeout
+
+    config = {"pagination": {"enabled": True, "additional_pages": 2}}
+    assert resolve_workflow_timeout(None, 300, config=config) == 900
+    assert resolve_workflow_timeout(120, 300, config=config) == 120
+    assert (
+        resolve_workflow_timeout(
+            None, 300, config=config, url_count=2, execution_mode="sequential"
+        )
+        == 1800
+    )
+
+
+def test_iso3166_alpha2_exposes_country_codes():
+    from makra import EventTypes, Iso3166Alpha2, StreamDetailTypes
+
+    assert Iso3166Alpha2.DE == "DE"
+    assert EventTypes.RUN_COMPLETED == "workflow.run.completed"
+    assert StreamDetailTypes.RUN_TITLE_GENERATED == "run.title_generated"
 
 
 def test_explicit_empty_base_url_is_invalid():

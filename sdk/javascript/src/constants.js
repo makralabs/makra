@@ -85,12 +85,20 @@ export const ValidationModes = Object.freeze({
   REPAIR: "repair",
 });
 
-export const SelectorChainVersions = Object.freeze({ V1: "v1", V2: "v2" });
-
 export const ProxyRegionScopes = Object.freeze({
   WORLDWIDE: "worldwide",
   CONTINENT: "continent",
   COUNTRY: "country",
+});
+
+/** Continent slugs for `config.crawler.proxy.region.value` when scope is continent. */
+export const ProxyContinents = Object.freeze({
+  AFRICA: "africa",
+  ASIA: "asia",
+  EUROPE: "europe",
+  NORTH_AMERICA: "north.america",
+  OCEANIA: "oceania",
+  SOUTH_AMERICA: "south.america",
 });
 
 /** The billable workflow a run belongs to. */
@@ -98,10 +106,8 @@ export const Features = Object.freeze({ EXTRACT: "extract", SCHEMA: "schema" });
 
 export const EXECUTION_MODES = new Set(Object.values(ExecutionModes));
 export const VALIDATION_MODES = new Set(Object.values(ValidationModes));
-export const SELECTOR_CHAIN_VERSIONS = new Set(
-  Object.values(SelectorChainVersions),
-);
 export const PROXY_REGION_SCOPES = new Set(Object.values(ProxyRegionScopes));
+export const PROXY_CONTINENTS = new Set(Object.values(ProxyContinents));
 
 // --- Run lifecycle ---------------------------------------------------------
 
@@ -122,7 +128,7 @@ export const TERMINAL_RUN_STATES = new Set([
   RunStates.BUDGET_EXHAUSTED,
 ]);
 
-/** SSE `event:` names emitted on a run's event stream. */
+/** SSE `event:` names on a run's public event stream. */
 export const EventTypes = Object.freeze({
   RUN_STARTED: "workflow.run.started",
   RUN_HEARTBEAT: "workflow.run.heartbeat",
@@ -143,6 +149,33 @@ export const TERMINAL_EVENT_TYPES = new Set([
   EventTypes.RUN_CANCELLED,
   EventTypes.RUN_BUDGET_EXHAUSTED,
 ]);
+
+/** Fine-grained `payload.stream_event_type` values (`event.detailType`). */
+export const StreamDetailTypes = Object.freeze({
+  RUN_STARTED: "run.started",
+  RUN_STATUS_CHANGED: "run.status_changed",
+  RUN_COMPLETED: "run.completed",
+  RUN_FAILED: "run.failed",
+  RUN_CANCELLED: "run.cancelled",
+  RUN_BUDGET_EXHAUSTED: "run.budget_exhausted",
+  RUN_TITLE_GENERATED: "run.title_generated",
+  STAGE_STARTED: "stage.started",
+  STAGE_PROGRESS: "stage.progress",
+  STAGE_COMPLETED: "stage.completed",
+  STAGE_FAILED: "stage.failed",
+  STAGE_SKIPPED: "stage.skipped",
+  ACTIVITY_STARTED: "activity.started",
+  ACTIVITY_UPDATED: "activity.updated",
+  ACTIVITY_OUTPUT_DELTA: "activity.output_delta",
+  ACTIVITY_COMPLETED: "activity.completed",
+  ACTIVITY_FAILED: "activity.failed",
+  MESSAGE_STARTED: "message.started",
+  MESSAGE_DELTA: "message.delta",
+  MESSAGE_COMPLETED: "message.completed",
+  RESULT_PARTIAL: "result.partial",
+  RESULT_COMPLETED: "result.completed",
+  DIAGNOSTIC: "diagnostic",
+});
 
 // --- Error codes -----------------------------------------------------------
 

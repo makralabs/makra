@@ -22,7 +22,7 @@ export class WorkflowEvent {
     return TERMINAL_EVENT_TYPES.has(this.type);
   }
 
-  /** The fine-grained step name, e.g. `run.title_generated`. */
+  /** The fine-grained step name; compare with `StreamDetailTypes`. */
   get detailType() {
     return stringOrUndefined(this.payload.stream_event_type);
   }

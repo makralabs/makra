@@ -39,6 +39,7 @@ import {
   buildExtractPayload,
   buildSchemaPayload,
   newIdempotencyKey,
+  resolveWorkflowTimeout,
 } from "./requests.js";
 import { apiError, deadline, decodeBody, isTimeout } from "./response.js";
 import { isRetryableStatus, retryDelay, sleep } from "./retry.js";
@@ -82,7 +83,9 @@ export class Makra {
    * Extract structured data and wait for the result.
    *
    * The connection is held until the run is terminal, so `timeout` is
-   * effectively the longest a workflow may take.
+   * effectively the longest a workflow may take. When omitted, the client
+   * default is a per-page budget: paginated extracts and sequential
+   * multi-URL extracts get a proportionally longer deadline.
    */
   async extract({
     urls,
@@ -98,7 +101,7 @@ export class Makra {
       body,
       headers: submitHeaders(idempotencyKey),
       retryable: true,
-      timeout,
+      timeout: this.#workflowTimeout(timeout, body),
       signal,
     });
   }
@@ -110,7 +113,7 @@ export class Makra {
       body,
       headers: submitHeaders(idempotencyKey),
       retryable: true,
-      timeout,
+      timeout: this.#workflowTimeout(timeout, body),
       signal,
     });
   }
@@ -171,13 +174,17 @@ export class Makra {
     signal,
   }) {
     const body = buildExtractPayload({ urls, schema, executionMode, config });
-    return new RunHandle(this, await this.#submit(PATH_EXTRACT, body, idempotencyKey, signal));
+    return new RunHandle(this, await this.#submit(PATH_EXTRACT, body, idempotencyKey, signal), {
+      timeout: this.#workflowTimeout(undefined, body),
+    });
   }
 
   /** Queue a schema build and return immediately with a run handle. */
   async submitSchema({ url, onlyMemoized = false, config, idempotencyKey, signal }) {
     const body = buildSchemaPayload({ url, onlyMemoized, config });
-    return new RunHandle(this, await this.#submit(PATH_SCHEMA, body, idempotencyKey, signal));
+    return new RunHandle(this, await this.#submit(PATH_SCHEMA, body, idempotencyKey, signal), {
+      timeout: this.#workflowTimeout(undefined, body),
+    });
   }
 
   // --- Run management ------------------------------------------------------
@@ -307,6 +314,14 @@ export class Makra {
         }),
       );
     }
+  }
+
+  #workflowTimeout(timeout, body) {
+    return resolveWorkflowTimeout(timeout, this.config.timeout, {
+      config: body?.config,
+      urlCount: Array.isArray(body?.urls) ? body.urls.length : 1,
+      executionMode: body?.execution_mode ?? ExecutionModes.CONCURRENT,
+    });
   }
 
   #connectionError(cause, method, path) {

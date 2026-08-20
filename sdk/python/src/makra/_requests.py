@@ -13,10 +13,13 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from ._constants import (
     EXECUTION_MODES,
+    PROXY_CONTINENTS,
     PROXY_REGION_SCOPES,
-    SELECTOR_CHAIN_VERSIONS,
     VALIDATION_MODES,
+    ExecutionModes,
+    ProxyRegionScopes,
 )
+from ._iso3166 import ISO_3166_ALPHA2_CODES
 from ._types import ExtractConfig, JsonSchema, SchemaConfig
 
 
@@ -69,6 +72,37 @@ def new_idempotency_key() -> str:
     return "makra-sdk-" + uuid.uuid4().hex
 
 
+def resolve_workflow_timeout(
+    explicit: Optional[float],
+    base: float,
+    *,
+    config: Optional[Mapping[str, Any]] = None,
+    url_count: int = 1,
+    execution_mode: str = ExecutionModes.CONCURRENT,
+) -> float:
+    """Resolve how long a workflow request may occupy the connection.
+
+    An explicit timeout always wins. Otherwise the client default is treated
+    as a *per-page* budget: pagination adds one unit per additional page, and
+    sequential multi-URL extracts multiply by the URL count. Concurrent URLs
+    share wall-clock, so they do not multiply the budget.
+    """
+    if explicit is not None:
+        return explicit
+    pages = 1
+    pagination = config.get("pagination") if isinstance(config, Mapping) else None
+    if isinstance(pagination, Mapping) and pagination.get("enabled"):
+        extra = pagination.get("additional_pages") or 0
+        if isinstance(extra, int) and not isinstance(extra, bool) and extra > 0:
+            pages = 1 + extra
+    urls = (
+        url_count
+        if execution_mode == ExecutionModes.SEQUENTIAL and url_count > 0
+        else 1
+    )
+    return base * pages * urls
+
+
 def _validated_urls(urls: Sequence[str]) -> List[str]:
     if isinstance(urls, str) or not isinstance(urls, Sequence):
         raise ValueError("urls must be a list of URL strings")
@@ -88,10 +122,11 @@ def _validated_schema(schema: JsonSchema) -> JsonSchema:
 
 def _validated_extract_config(config: Optional[ExtractConfig]) -> Dict[str, Any]:
     resolved = _validated_common_config(config, path="config")
+    if "audit" in resolved:
+        raise ValueError("config.audit is not supported")
     mode = resolved.get("validation_mode", _MISSING)
     if mode is not _MISSING and mode is not None:
         _validated_choice("config.validation_mode", mode, VALIDATION_MODES)
-    _validate_flags(resolved.get("audit"), "config.audit", ("enabled", "use_cache"))
     _validate_pagination(resolved.get("pagination"))
     _validate_flags(resolved.get("title"), "config.title", ("enabled",))
     return resolved
@@ -105,55 +140,105 @@ def _validated_common_config(
     if not isinstance(config, Mapping):
         raise ValueError("{} must be a mapping".format(path))
     resolved = dict(config)
-    _validate_memory(resolved.get("memory"))
-    _validate_crawler(resolved.get("crawler"))
+    if "memory" in resolved:
+        raise ValueError("config.memory is not supported")
+    crawler = resolved.get("crawler")
+    if crawler is not None:
+        resolved["crawler"] = _normalized_crawler(crawler)
     return resolved
 
 
-def _validate_memory(memory: Any) -> None:
-    if memory is None:
-        return
-    _require_mapping(memory, "config.memory")
-    version = memory.get("selector_chain_version")
-    if version is not None:
-        _validated_choice(
-            "config.memory.selector_chain_version", version, SELECTOR_CHAIN_VERSIONS
-        )
-    _validate_flags(memory, "config.memory", ("enabled",))
-
-
-def _validate_crawler(crawler: Any) -> None:
-    if crawler is None:
-        return
+def _normalized_crawler(crawler: Any) -> Dict[str, Any]:
     _require_mapping(crawler, "config.crawler")
+    resolved = dict(crawler)
     _validate_bounded_ms(
-        crawler.get("post_ready_wait_ms"), "config.crawler.post_ready_wait_ms", 120_000
+        resolved.get("post_ready_wait_ms"), "config.crawler.post_ready_wait_ms", 120_000
     )
-    recovery = crawler.get("recovery")
+    recovery = resolved.get("recovery")
     if recovery is not None:
-        _require_mapping(recovery, "config.crawler.recovery")
-        _validate_flags(recovery, "config.crawler.recovery", ("one_last_retry",))
+        resolved["recovery"] = _recovery_to_wire(recovery)
+    proxy = resolved.get("proxy")
+    if proxy is not None:
+        resolved["proxy"] = _normalized_proxy(proxy)
+    return resolved
+
+
+def _recovery_to_wire(recovery: Any) -> Dict[str, Any]:
+    """Map SDK ``retry`` / ``retry_delay_ms`` onto the API's recovery fields."""
+    _require_mapping(recovery, "config.crawler.recovery")
+    extra = set(recovery) - {"retry", "retry_delay_ms"}
+    if extra:
+        raise ValueError(
+            "config.crawler.recovery only accepts retry and retry_delay_ms; "
+            "unknown keys: {}".format(", ".join(sorted(extra)))
+        )
+    wire: Dict[str, Any] = {}
+    if "retry" in recovery:
+        retry = recovery["retry"]
+        if retry is not None and not isinstance(retry, bool):
+            raise ValueError("config.crawler.recovery.retry must be a boolean")
+        if retry is not None:
+            wire["one_last_retry"] = retry
+    if "retry_delay_ms" in recovery:
         _validate_bounded_ms(
-            recovery.get("one_last_retry_delay_ms"),
-            "config.crawler.recovery.one_last_retry_delay_ms",
+            recovery["retry_delay_ms"],
+            "config.crawler.recovery.retry_delay_ms",
             300_000,
         )
-    proxy = crawler.get("proxy")
-    if proxy is None:
-        return
+        wire["one_last_retry_delay_ms"] = recovery["retry_delay_ms"]
+    return wire
+
+
+def _normalized_proxy(proxy: Any) -> Dict[str, Any]:
     _require_mapping(proxy, "config.crawler.proxy")
-    region = proxy.get("region")
+    resolved = dict(proxy)
+    region = resolved.get("region")
     if region is None:
-        return
+        return resolved
+    resolved["region"] = _normalized_region(region)
+    return resolved
+
+
+def _normalized_region(region: Any) -> Dict[str, Any]:
     _require_mapping(region, "config.crawler.proxy.region")
-    scope = region.get("scope")
+    resolved = dict(region)
+    scope = resolved.get("scope")
     if scope is not None:
         _validated_choice(
             "config.crawler.proxy.region.scope", scope, PROXY_REGION_SCOPES
         )
-    value = region.get("value")
+    value = resolved.get("value")
     if value is not None and not isinstance(value, str):
         raise ValueError("config.crawler.proxy.region.value must be a string or None")
+    if scope == ProxyRegionScopes.WORLDWIDE and value is not None:
+        raise ValueError(
+            "config.crawler.proxy.region.value must be None when scope is worldwide"
+        )
+    if scope == ProxyRegionScopes.COUNTRY:
+        if not value:
+            raise ValueError(
+                "config.crawler.proxy.region.value is required when scope is country"
+            )
+        normalized = value.strip().upper()
+        if normalized not in ISO_3166_ALPHA2_CODES:
+            raise ValueError(
+                "config.crawler.proxy.region.value must be an ISO 3166-1 alpha-2 "
+                "country code such as Iso3166Alpha2.DE"
+            )
+        resolved["value"] = normalized
+    if scope == ProxyRegionScopes.CONTINENT:
+        if not value:
+            raise ValueError(
+                "config.crawler.proxy.region.value is required when scope is continent"
+            )
+        normalized = value.strip().lower()
+        if normalized not in PROXY_CONTINENTS:
+            raise ValueError(
+                "config.crawler.proxy.region.value must be a ProxyContinents slug "
+                "such as ProxyContinents.EUROPE"
+            )
+        resolved["value"] = normalized
+    return resolved
 
 
 def _validate_pagination(pagination: Any) -> None:

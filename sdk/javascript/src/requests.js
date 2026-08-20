@@ -9,10 +9,13 @@
 
 import {
   EXECUTION_MODES,
+  ExecutionModes,
+  PROXY_CONTINENTS,
   PROXY_REGION_SCOPES,
-  SELECTOR_CHAIN_VERSIONS,
+  ProxyRegionScopes,
   VALIDATION_MODES,
 } from "./constants.js";
+import { ISO_3166_ALPHA2 } from "./iso3166.js";
 
 /** Build the `POST /workflows/extract` body. */
 export function buildExtractPayload({ urls, schema, executionMode, config, stream }) {
@@ -48,6 +51,32 @@ export function newIdempotencyKey() {
   return `makra-sdk-${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
 }
 
+/**
+ * Resolve how long a workflow request may occupy the connection.
+ *
+ * An explicit timeout always wins. Otherwise the client default is a
+ * per-page budget: pagination adds one unit per additional page, and
+ * sequential multi-URL extracts multiply by the URL count.
+ *
+ * Durations are milliseconds.
+ */
+export function resolveWorkflowTimeout(
+  explicit,
+  base,
+  { config, urlCount = 1, executionMode = ExecutionModes.CONCURRENT } = {},
+) {
+  if (explicit !== undefined && explicit !== null) return explicit;
+  let pages = 1;
+  const pagination = config?.pagination;
+  if (pagination && pagination.enabled) {
+    const extra = pagination.additional_pages || 0;
+    if (Number.isInteger(extra) && extra > 0) pages = 1 + extra;
+  }
+  const urls =
+    executionMode === ExecutionModes.SEQUENTIAL && urlCount > 0 ? urlCount : 1;
+  return base * pages * urls;
+}
+
 function validatedUrls(urls) {
   if (!Array.isArray(urls)) throw new TypeError("urls must be an array of URL strings");
   if (urls.length === 0) throw new RangeError("urls must contain at least one URL");
@@ -72,10 +101,12 @@ function validatedSchema(schema) {
 
 function validatedExtractConfig(config) {
   const resolved = validatedCommonConfig(config, "config");
+  if (Object.prototype.hasOwnProperty.call(resolved, "audit")) {
+    throw new TypeError("config.audit is not supported");
+  }
   if (resolved.validation_mode !== undefined && resolved.validation_mode !== null) {
     validatedChoice("config.validation_mode", resolved.validation_mode, VALIDATION_MODES);
   }
-  validateFlags(resolved.audit, "config.audit", ["enabled", "use_cache"]);
   validatePagination(resolved.pagination);
   validateFlags(resolved.title, "config.title", ["enabled"]);
   return resolved;
@@ -85,56 +116,116 @@ function validatedCommonConfig(config, path) {
   if (config === undefined || config === null) return {};
   requireObject(config, path);
   const resolved = { ...config };
-  validateMemory(resolved.memory);
-  validateCrawler(resolved.crawler);
+  if (Object.prototype.hasOwnProperty.call(resolved, "memory")) {
+    throw new TypeError("config.memory is not supported");
+  }
+  if (resolved.crawler !== undefined && resolved.crawler !== null) {
+    resolved.crawler = normalizedCrawler(resolved.crawler);
+  }
   return resolved;
 }
 
-function validateMemory(memory) {
-  if (memory === undefined || memory === null) return;
-  requireObject(memory, "config.memory");
-  if (memory.selector_chain_version !== undefined && memory.selector_chain_version !== null) {
-    validatedChoice(
-      "config.memory.selector_chain_version",
-      memory.selector_chain_version,
-      SELECTOR_CHAIN_VERSIONS,
-    );
-  }
-  validateFlags(memory, "config.memory", ["enabled"]);
-}
-
-function validateCrawler(crawler) {
-  if (crawler === undefined || crawler === null) return;
+function normalizedCrawler(crawler) {
   requireObject(crawler, "config.crawler");
+  const resolved = { ...crawler };
   validateBoundedMs(
-    crawler.post_ready_wait_ms,
+    resolved.post_ready_wait_ms,
     "config.crawler.post_ready_wait_ms",
     120_000,
   );
+  if (resolved.recovery !== undefined && resolved.recovery !== null) {
+    resolved.recovery = recoveryToWire(resolved.recovery);
+  }
+  if (resolved.proxy !== undefined && resolved.proxy !== null) {
+    resolved.proxy = normalizedProxy(resolved.proxy);
+  }
+  return resolved;
+}
 
-  const recovery = crawler.recovery;
-  if (recovery !== undefined && recovery !== null) {
-    requireObject(recovery, "config.crawler.recovery");
-    validateFlags(recovery, "config.crawler.recovery", ["one_last_retry"]);
-    validateBoundedMs(
-      recovery.one_last_retry_delay_ms,
-      "config.crawler.recovery.one_last_retry_delay_ms",
-      300_000,
+function recoveryToWire(recovery) {
+  requireObject(recovery, "config.crawler.recovery");
+  const extra = Object.keys(recovery).filter(
+    (key) => key !== "retry" && key !== "retry_delay_ms",
+  );
+  if (extra.length > 0) {
+    throw new TypeError(
+      `config.crawler.recovery only accepts retry and retry_delay_ms; unknown keys: ${extra.sort().join(", ")}`,
     );
   }
-
-  const proxy = crawler.proxy;
-  if (proxy === undefined || proxy === null) return;
-  requireObject(proxy, "config.crawler.proxy");
-  const region = proxy.region;
-  if (region === undefined || region === null) return;
-  requireObject(region, "config.crawler.proxy.region");
-  if (region.scope !== undefined && region.scope !== null) {
-    validatedChoice("config.crawler.proxy.region.scope", region.scope, PROXY_REGION_SCOPES);
+  const wire = {};
+  if (Object.prototype.hasOwnProperty.call(recovery, "retry")) {
+    const retry = recovery.retry;
+    if (retry !== undefined && retry !== null && typeof retry !== "boolean") {
+      throw new TypeError("config.crawler.recovery.retry must be a boolean");
+    }
+    if (retry !== undefined && retry !== null) wire.one_last_retry = retry;
   }
-  if (region.value !== undefined && region.value !== null && typeof region.value !== "string") {
+  if (Object.prototype.hasOwnProperty.call(recovery, "retry_delay_ms")) {
+    validateBoundedMs(
+      recovery.retry_delay_ms,
+      "config.crawler.recovery.retry_delay_ms",
+      300_000,
+    );
+    wire.one_last_retry_delay_ms = recovery.retry_delay_ms;
+  }
+  return wire;
+}
+
+function normalizedProxy(proxy) {
+  requireObject(proxy, "config.crawler.proxy");
+  const resolved = { ...proxy };
+  if (resolved.region === undefined || resolved.region === null) return resolved;
+  resolved.region = normalizedRegion(resolved.region);
+  return resolved;
+}
+
+function normalizedRegion(region) {
+  requireObject(region, "config.crawler.proxy.region");
+  const resolved = { ...region };
+  if (resolved.scope !== undefined && resolved.scope !== null) {
+    validatedChoice("config.crawler.proxy.region.scope", resolved.scope, PROXY_REGION_SCOPES);
+  }
+  if (
+    resolved.value !== undefined &&
+    resolved.value !== null &&
+    typeof resolved.value !== "string"
+  ) {
     throw new TypeError("config.crawler.proxy.region.value must be a string or null");
   }
+  if (resolved.scope === ProxyRegionScopes.WORLDWIDE && resolved.value != null) {
+    throw new TypeError(
+      "config.crawler.proxy.region.value must be null when scope is worldwide",
+    );
+  }
+  if (resolved.scope === ProxyRegionScopes.COUNTRY) {
+    if (!resolved.value) {
+      throw new TypeError(
+        "config.crawler.proxy.region.value is required when scope is country",
+      );
+    }
+    const normalized = resolved.value.trim().toUpperCase();
+    if (!ISO_3166_ALPHA2.has(normalized)) {
+      throw new TypeError(
+        "config.crawler.proxy.region.value must be an ISO 3166-1 alpha-2 country code such as Iso3166Alpha2.DE",
+      );
+    }
+    resolved.value = normalized;
+  }
+  if (resolved.scope === ProxyRegionScopes.CONTINENT) {
+    if (!resolved.value) {
+      throw new TypeError(
+        "config.crawler.proxy.region.value is required when scope is continent",
+      );
+    }
+    const normalized = resolved.value.trim().toLowerCase();
+    if (!PROXY_CONTINENTS.has(normalized)) {
+      throw new TypeError(
+        "config.crawler.proxy.region.value must be a ProxyContinents slug such as ProxyContinents.EUROPE",
+      );
+    }
+    resolved.value = normalized;
+  }
+  return resolved;
 }
 
 function validatePagination(pagination) {

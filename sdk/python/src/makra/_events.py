@@ -31,7 +31,7 @@ class WorkflowEvent:
 
     @property
     def detail_type(self) -> Optional[str]:
-        """The fine-grained step name, e.g. ``run.title_generated``."""
+        """The fine-grained step name; compare with ``StreamDetailTypes``."""
         value = self.payload.get("stream_event_type")
         return value if isinstance(value, str) else None
 

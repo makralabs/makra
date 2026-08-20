@@ -53,7 +53,7 @@ JavaScript.
 | Production base URL | `https://api.makralabs.org` | |
 | Development base URL constant | `http://localhost:8080` | |
 | API key fallback | `makra-development-key` | |
-| Request timeout | 300 s / 300,000 ms | A blocking submission holds the connection until the run is terminal |
+| Request timeout | 300 s / 300,000 ms per origin page | Blocking submissions hold the connection until the run is terminal. Paginated extracts and sequential multi-URL extracts multiply this budget automatically unless the caller passes an explicit timeout. |
 | Connect timeout (Python only) | 10 s | |
 | Stream idle timeout | 90 s / 90,000 ms | The gateway heartbeats every 15 s; a far larger gap means a dead connection |
 | Max retries | 2 | |
@@ -137,8 +137,9 @@ The package MUST export:
 - `WorkflowEvent`;
 - the full error hierarchy of §8.1;
 - `PRODUCTION_BASE_URL`, `DEVELOPMENT_BASE_URL`, `SDK_VERSION`, and the enum
-  namespaces `ExecutionModes`, `ValidationModes`, `SelectorChainVersions`,
-  `ProxyRegionScopes`, `Features`, `RunStates`, `EventTypes`, `ErrorCodes`;
+  namespaces `ExecutionModes`, `ValidationModes`, `Iso3166Alpha2`,
+  `ProxyRegionScopes`, `ProxyContinents`, `Features`, `RunStates`,
+  `EventTypes`, `StreamDetailTypes`, `ErrorCodes`;
 - typed config aliases used by operations (`CommonConfig`, `ExtractConfig`,
   `SchemaConfig`) and response aliases (`RunView`, `RunPage`, `AsyncAdmission`).
 
@@ -346,6 +347,9 @@ Each dispatched message MUST be exposed as an event object:
 | Step name | `detail_type` | `detailType` | `payload.stream_event_type` |
 | Status / reason / success | `status`, `reason`, `success` | same, camelCase | payload fields |
 
+Callers MUST be able to match `type` against `EventTypes` and `detail_type` /
+`detailType` against `StreamDetailTypes` without string literals.
+
 Terminal event names are `workflow.run.completed`, `workflow.run.failed`,
 `workflow.run.cancelled`, and `workflow.run.budget_exhausted`. Iteration MUST
 stop after yielding a terminal event.
@@ -442,7 +446,19 @@ per submission when the caller does not supply it.
 
 `config` is a nested JSON object. Deployment policy supplies defaults; callers
 override only the keys they set. Unknown keys are rejected by the server.
-Clients MUST preserve caller-supplied keys and MUST NOT invent alternate names.
+
+SDK public names MUST be used in Python and JavaScript `config` objects. One
+recovery pair is renamed for callers and mapped onto the wire names before the
+request is sent:
+
+| SDK config path | Wire path |
+| --- | --- |
+| `crawler.recovery.retry` | `crawler.recovery.one_last_retry` |
+| `crawler.recovery.retry_delay_ms` | `crawler.recovery.one_last_retry_delay_ms` |
+
+Implementations MUST reject `config.memory`, `config.audit`,
+`selector_chain_version`, and the wire recovery names `one_last_retry` /
+`one_last_retry_delay_ms` when they appear on the public `config` object.
 
 ### 6.1 Common config (extract and schema)
 
@@ -450,10 +466,6 @@ These keys MAY appear on both `extract` and `schema` requests:
 
 ```json
 {
-  "memory": {
-    "enabled": true,
-    "selector_chain_version": "v2"
-  },
   "crawler": {
     "post_ready_wait_ms": null,
     "proxy": {
@@ -463,8 +475,8 @@ These keys MAY appear on both `extract` and `schema` requests:
       }
     },
     "recovery": {
-      "one_last_retry": true,
-      "one_last_retry_delay_ms": null
+      "retry": true,
+      "retry_delay_ms": null
     }
   }
 }
@@ -472,16 +484,16 @@ These keys MAY appear on both `extract` and `schema` requests:
 
 | Path | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `memory.enabled` | boolean | `true` | Use stored extraction strategies |
-| `memory.selector_chain_version` | string | `"v2"` | Allowed: `"v1"`, `"v2"` |
 | `crawler.post_ready_wait_ms` | integer \| null | `null` | `0`–`120000`; `null` uses deployment default |
 | `crawler.proxy.region.scope` | string | `"worldwide"` | Allowed: `"worldwide"`, `"continent"`, `"country"` |
-| `crawler.proxy.region.value` | string \| null | `null` | `null` for worldwide; continent slug; ISO alpha-2 country code |
-| `crawler.recovery.one_last_retry` | boolean | `true` | One final fresh-session retry |
-| `crawler.recovery.one_last_retry_delay_ms` | integer \| null | `null` | `0`–`300000`; `null` uses deployment default |
+| `crawler.proxy.region.value` | string \| null | `null` | `null` for worldwide; a `ProxyContinents` slug; an ISO 3166-1 alpha-2 code (`Iso3166Alpha2`) |
+| `crawler.recovery.retry` | boolean | `true` | One final fresh-session retry |
+| `crawler.recovery.retry_delay_ms` | integer \| null | `null` | `0`–`300000`; `null` uses deployment default |
 
 Proxy mode and credentials are deployment policy. Callers only select the exit
-region.
+region. Country values MUST be ISO 3166-1 alpha-2 codes; continent values MUST
+be one of `africa`, `asia`, `europe`, `north.america`, `oceania`,
+`south.america`.
 
 ### 6.2 Extract-only config
 
@@ -490,10 +502,6 @@ These keys are valid only on `extract` requests:
 ```json
 {
   "validation_mode": "repair",
-  "audit": {
-    "enabled": false,
-    "use_cache": true
-  },
   "pagination": {
     "enabled": false,
     "additional_pages": 0
@@ -507,11 +515,15 @@ These keys are valid only on `extract` requests:
 | Path | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `validation_mode` | string \| null | `"repair"` | Allowed: `"observe"`, `"repair"`, `null` |
-| `audit.enabled` | boolean | `false` | Development only |
-| `audit.use_cache` | boolean | `true` | Replay cached audit artifacts when available |
 | `pagination.enabled` | boolean | `false` | Follow next-page controls |
 | `pagination.additional_pages` | integer | `0` | Must be `>= 0`; pages beyond the origin URL |
 | `title.enabled` | boolean | deployment default | Generate a human-readable run title |
+
+When `pagination.enabled` is true, the default blocking and `wait` timeout
+MUST be `base * (1 + additional_pages)`. Sequential extract additionally
+multiplies by the URL count. An explicit `timeout` argument disables scaling.
+Stream idle timeout is unchanged: it bounds silence between SSE events, not
+run duration.
 
 ### 6.3 Schema-only config
 
@@ -694,6 +706,7 @@ sdk/
     src/makra/
       __init__.py     public surface
       _constants.py   URLs, headers, enums, defaults
+      _iso3166.py     ISO 3166-1 alpha-2 country codes
       _config.py      settings resolution
       _errors.py      error hierarchy and HTTP mapping
       _requests.py    validation and payload building
@@ -710,6 +723,7 @@ sdk/
       index.js        public surface
       index.d.ts      TypeScript declarations
       constants.js    URLs, headers, enums, defaults
+      iso3166.js      ISO 3166-1 alpha-2 country codes
       config.js       settings resolution
       errors.js       error hierarchy and HTTP mapping
       requests.js     validation and payload building

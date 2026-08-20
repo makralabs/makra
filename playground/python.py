@@ -28,10 +28,9 @@ def main() -> None:
                     "title": "The page title",
                     "description": "A short description of the page",
                 },
-                config={
-                    "validation_mode": "repair",
-                    "memory": {"enabled": True, "selector_chain_version": "v2"},
-                },
+            config={
+                "validation_mode": "repair",
+            },
             )
             print("extract:", json.dumps(result, indent=2))
 

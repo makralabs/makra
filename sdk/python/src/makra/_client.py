@@ -59,6 +59,7 @@ from ._requests import (
     build_extract_payload,
     build_schema_payload,
     new_idempotency_key,
+    resolve_workflow_timeout,
 )
 from ._response import api_error, decode_body
 from ._retry import is_retryable_status, retry_delay
@@ -185,6 +186,21 @@ class _BaseClient:
             )
         return run
 
+    def _workflow_timeout(
+        self,
+        timeout: Optional[float],
+        payload: Mapping[str, Any],
+        *,
+        url_count: int = 1,
+    ) -> float:
+        return resolve_workflow_timeout(
+            timeout,
+            self._config.timeout,
+            config=payload.get("config") if isinstance(payload.get("config"), Mapping) else None,
+            url_count=url_count,
+            execution_mode=str(payload.get("execution_mode", ExecutionModes.CONCURRENT)),
+        )
+
     def _connection_error(
         self, error: Exception, method: str, path: str
     ) -> MakraConnectionError:
@@ -293,7 +309,9 @@ class Makra(_BaseClient):
         """Extract structured data and wait for the result.
 
         The connection is held until the run is terminal, so ``timeout`` is
-        effectively the longest a workflow may take.
+        effectively the longest a workflow may take. When omitted, the client
+        default is a per-page budget: paginated extracts and sequential
+        multi-URL extracts get a proportionally longer deadline.
         """
         payload = build_extract_payload(
             urls, schema, execution_mode=execution_mode, config=config
@@ -303,7 +321,7 @@ class Makra(_BaseClient):
             PATH_EXTRACT,
             json=payload,
             headers=self._submit_headers(idempotency_key),
-            timeout=timeout,
+            timeout=self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
             retryable=True,
         )
 
@@ -325,7 +343,7 @@ class Makra(_BaseClient):
             PATH_SCHEMA,
             json=payload,
             headers=self._submit_headers(idempotency_key),
-            timeout=timeout,
+            timeout=self._workflow_timeout(timeout, payload),
             retryable=True,
         )
 
@@ -392,7 +410,11 @@ class Makra(_BaseClient):
         payload = build_extract_payload(
             urls, schema, execution_mode=execution_mode, config=config
         )
-        return RunHandle(self, self._submit(PATH_EXTRACT, payload, idempotency_key))
+        return RunHandle(
+            self,
+            self._submit(PATH_EXTRACT, payload, idempotency_key),
+            timeout=self._workflow_timeout(None, payload, url_count=len(payload["urls"])),
+        )
 
     def submit_schema(
         self,
@@ -406,7 +428,11 @@ class Makra(_BaseClient):
         payload = build_schema_payload(
             url, only_memoized=only_memoized, config=config
         )
-        return RunHandle(self, self._submit(PATH_SCHEMA, payload, idempotency_key))
+        return RunHandle(
+            self,
+            self._submit(PATH_SCHEMA, payload, idempotency_key),
+            timeout=self._workflow_timeout(None, payload),
+        )
 
     # --- Run management -----------------------------------------------------
 
@@ -662,7 +688,7 @@ class AsyncMakra(_BaseClient):
             PATH_EXTRACT,
             json=payload,
             headers=self._submit_headers(idempotency_key),
-            timeout=timeout,
+            timeout=self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
             retryable=True,
         )
 
@@ -683,7 +709,7 @@ class AsyncMakra(_BaseClient):
             PATH_SCHEMA,
             json=payload,
             headers=self._submit_headers(idempotency_key),
-            timeout=timeout,
+            timeout=self._workflow_timeout(timeout, payload),
             retryable=True,
         )
 
@@ -742,7 +768,11 @@ class AsyncMakra(_BaseClient):
             urls, schema, execution_mode=execution_mode, config=config
         )
         admission = await self._submit(PATH_EXTRACT, payload, idempotency_key)
-        return AsyncRunHandle(self, admission)
+        return AsyncRunHandle(
+            self,
+            admission,
+            timeout=self._workflow_timeout(None, payload, url_count=len(payload["urls"])),
+        )
 
     async def submit_schema(
         self,
@@ -756,7 +786,9 @@ class AsyncMakra(_BaseClient):
             url, only_memoized=only_memoized, config=config
         )
         admission = await self._submit(PATH_SCHEMA, payload, idempotency_key)
-        return AsyncRunHandle(self, admission)
+        return AsyncRunHandle(
+            self, admission, timeout=self._workflow_timeout(None, payload)
+        )
 
     # --- Run management -----------------------------------------------------
 

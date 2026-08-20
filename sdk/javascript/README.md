@@ -35,16 +35,25 @@ Pick by how long the work takes and how much you want to watch it happen.
 ### 1. REST
 
 The connection is held until the run finishes, so `timeout` is really "how
-long may this workflow take". It defaults to 300000 ms.
+long may this workflow take". It defaults to 300000 ms **per origin page**.
+Paginated extracts (`pagination.additional_pages`) and sequential multi-URL
+extracts scale that budget automatically unless you pass `timeout` yourself.
 
 ```js
+import { Iso3166Alpha2, Makra, ProxyContinents, ProxyRegionScopes, ValidationModes } from "makra";
+
 const data = await makra.extract({
   urls: ["https://example.com/products"],
   schema: { products: [{ name: "string", price: "number" }] },
   config: {
-    validation_mode: "repair",
-    memory: { enabled: true, selector_chain_version: "v2" },
+    validation_mode: ValidationModes.REPAIR,
     pagination: { enabled: true, additional_pages: 2 },
+    crawler: {
+      proxy: {
+        region: { scope: ProxyRegionScopes.COUNTRY, value: Iso3166Alpha2.DE },
+      },
+      recovery: { retry: true, retry_delay_ms: 2000 },
+    },
   },
   timeout: 120_000,
 });
@@ -55,7 +64,13 @@ Discover what a page contains before you write a schema:
 ```js
 const pageSchema = await makra.schema({
   url: "https://example.com/products",
-  config: { crawler: { proxy: { region: { scope: "country", value: "DE" } } } },
+  config: {
+    crawler: {
+      proxy: {
+        region: { scope: ProxyRegionScopes.CONTINENT, value: ProxyContinents.EUROPE },
+      },
+    },
+  },
 });
 ```
 
@@ -65,10 +80,17 @@ The stream carries lifecycle and progress events, **not** the extracted data.
 When a terminal event arrives, fetch the stored result.
 
 ```js
+import { EventTypes, StreamDetailTypes } from "makra";
+
 let runId;
 for await (const event of makra.extractStream({ urls, schema })) {
   runId = event.runId;
   console.log(event.sequence, event.type, event.detailType);
+  if (event.type === EventTypes.STEP_PROGRESS) {
+    if (event.detailType === StreamDetailTypes.RUN_TITLE_GENERATED) {
+      console.log("title:", event.payload.title);
+    }
+  }
   if (event.isTerminal) console.log("finished:", event.status, event.reason);
 }
 
@@ -77,6 +99,8 @@ const data = await makra.getRunResult(runId);
 
 Each `WorkflowEvent` exposes `type`, `sequence`, `runId`, the raw `payload`,
 and the shortcuts `isTerminal`, `detailType`, `status`, `reason`, `success`.
+Compare `event.type` to `EventTypes` and `event.detailType` to
+`StreamDetailTypes`.
 
 If the connection drops mid-run, the SDK reconnects to the run's event
 endpoint with `Last-Event-ID`, so you see every event exactly once. Silence
@@ -116,7 +140,7 @@ because it is shared with the other Makra SDKs.
 | --- | --- | --- |
 | `apiKey` | `MAKRA_API_KEY` | `makra-development-key` |
 | `baseUrl` | `MAKRA_BASE_URL` | `https://api.makralabs.org` |
-| `timeout` | `MAKRA_TIMEOUT` (seconds) | `300000` |
+| `timeout` | `MAKRA_TIMEOUT` (seconds) | `300000` per origin page |
 | `maxRetries` | `MAKRA_MAX_RETRIES` | `2` |
 | `streamIdleTimeout` | — | `90000` |
 | `retryBackoff` | — | `500` |

@@ -75,7 +75,9 @@ def resolve_config(
     return ClientConfig(
         api_key=api_key or env.get(ENV_API_KEY) or DUMMY_API_KEY,
         base_url=_normalize_base_url(
-            base_url if base_url else env.get(ENV_BASE_URL) or PRODUCTION_BASE_URL
+            env.get(ENV_BASE_URL) or PRODUCTION_BASE_URL
+            if base_url is None
+            else base_url
         ),
         timeout=_positive(
             "timeout", timeout, env.get(ENV_TIMEOUT), DEFAULT_TIMEOUT

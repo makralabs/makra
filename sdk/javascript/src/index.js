@@ -57,9 +57,11 @@ export {
   ExecutionModes,
   Features,
   PRODUCTION_BASE_URL,
+  ProxyContinents,
   ProxyRegionScopes,
   RunStates,
   SDK_VERSION,
-  SelectorChainVersions,
+  StreamDetailTypes,
   ValidationModes,
 } from "./constants.js";
+export { Iso3166Alpha2, ISO_3166_ALPHA2_CODES } from "./iso3166.js";

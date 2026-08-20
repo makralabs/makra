@@ -6,7 +6,7 @@
  * thread it through every follow-up call.
  */
 export class RunHandle {
-  constructor(client, admission) {
+  constructor(client, admission, { timeout } = {}) {
     this.id = admission.run_id ?? "";
     this.feature = admission.feature;
     this.state = admission.state;
@@ -15,6 +15,7 @@ export class RunHandle {
     this.resultUrl = admission.result_url;
     this.admission = admission;
     this.client = client;
+    this._timeout = timeout;
   }
 
   /** Fetch current run metadata and update the cached state. */
@@ -28,8 +29,13 @@ export class RunHandle {
    * Prefer `stream()` when you want live progress; polling exists for
    * reconciliation and for callers that cannot hold a connection open.
    */
-  async wait(options) {
-    return this.#track(await this.client.waitForRun(this.id, options));
+  async wait(options = {}) {
+    return this.#track(
+      await this.client.waitForRun(this.id, {
+        ...options,
+        timeout: options.timeout ?? this._timeout,
+      }),
+    );
   }
 
   /** Attach to the run's live event stream. */

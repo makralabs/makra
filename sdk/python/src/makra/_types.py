@@ -15,8 +15,10 @@ JsonValue = Union[JsonPrimitive, Mapping[str, Any], List[Any]]
 JsonObject = Mapping[str, Any]
 JsonSchema = Union[Mapping[str, Any], List[Any]]
 
-SelectorChainVersion = Literal["v1", "v2"]
 ProxyRegionScope = Literal["worldwide", "continent", "country"]
+ProxyContinent = Literal[
+    "africa", "asia", "europe", "north.america", "oceania", "south.america"
+]
 ValidationMode = Literal["observe", "repair"]
 ExecutionMode = Literal["concurrent", "sequential"]
 Feature = Literal["extract", "schema"]
@@ -43,24 +45,16 @@ class ProxyConfig(TypedDict, total=False):
 
 
 class CrawlerRecoveryConfig(TypedDict, total=False):
-    one_last_retry: bool
-    one_last_retry_delay_ms: Optional[int]
+    """SDK-facing recovery flags. Sent on the wire as ``one_last_retry*``."""
+
+    retry: bool
+    retry_delay_ms: Optional[int]
 
 
 class CrawlerConfig(TypedDict, total=False):
     post_ready_wait_ms: Optional[int]
     proxy: ProxyConfig
     recovery: CrawlerRecoveryConfig
-
-
-class MemoryConfig(TypedDict, total=False):
-    enabled: bool
-    selector_chain_version: SelectorChainVersion
-
-
-class AuditConfig(TypedDict, total=False):
-    enabled: bool
-    use_cache: bool
 
 
 class PaginationConfig(TypedDict, total=False):
@@ -75,7 +69,6 @@ class TitleConfig(TypedDict, total=False):
 class CommonConfig(TypedDict, total=False):
     """Request-overridable config shared by the extract and schema workflows."""
 
-    memory: MemoryConfig
     crawler: CrawlerConfig
 
 
@@ -83,7 +76,6 @@ class ExtractConfig(CommonConfig, total=False):
     """Extract workflow config: common keys plus extract-only controls."""
 
     validation_mode: Optional[ValidationMode]
-    audit: AuditConfig
     pagination: PaginationConfig
     title: TitleConfig
 
@@ -157,7 +149,6 @@ class AsyncAdmission(TypedDict, total=False):
 
 __all__ = [
     "AsyncAdmission",
-    "AuditConfig",
     "CommonConfig",
     "CrawlerConfig",
     "CrawlerRecoveryConfig",
@@ -167,9 +158,9 @@ __all__ = [
     "JsonObject",
     "JsonSchema",
     "JsonValue",
-    "MemoryConfig",
     "PaginationConfig",
     "ProxyConfig",
+    "ProxyContinent",
     "ProxyRegionConfig",
     "ProxyRegionScope",
     "ResultSummary",
@@ -178,7 +169,6 @@ __all__ = [
     "RunState",
     "RunView",
     "SchemaConfig",
-    "SelectorChainVersion",
     "TitleConfig",
     "ValidationMode",
 ]

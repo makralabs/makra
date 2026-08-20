@@ -19,7 +19,9 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 class _BaseRunHandle:
     """Identity and admission metadata shared by both handle flavours."""
 
-    def __init__(self, admission: AsyncAdmission) -> None:
+    def __init__(
+        self, admission: AsyncAdmission, *, timeout: Optional[float] = None
+    ) -> None:
         self.id: str = str(admission.get("run_id", ""))
         self.feature: Optional[str] = admission.get("feature")
         self.state: Optional[str] = admission.get("state")
@@ -27,6 +29,7 @@ class _BaseRunHandle:
         self.events_url: Optional[str] = admission.get("events_url")
         self.result_url: Optional[str] = admission.get("result_url")
         self.admission: Dict[str, Any] = dict(admission)
+        self._timeout = timeout
 
     def __repr__(self) -> str:
         return "{}(id={!r}, feature={!r}, state={!r})".format(
@@ -37,8 +40,14 @@ class _BaseRunHandle:
 class RunHandle(_BaseRunHandle):
     """A submitted run, observable through the synchronous client."""
 
-    def __init__(self, client: "Makra", admission: AsyncAdmission) -> None:
-        super().__init__(admission)
+    def __init__(
+        self,
+        client: "Makra",
+        admission: AsyncAdmission,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
+        super().__init__(admission, timeout=timeout)
         self._client = client
 
     def refresh(self) -> RunView:
@@ -47,13 +56,17 @@ class RunHandle(_BaseRunHandle):
         self.state = run.get("state", self.state)
         return run
 
-    def wait(self, **kwargs: Any) -> RunView:
+    def wait(self, timeout: Optional[float] = None, **kwargs: Any) -> RunView:
         """Poll until the run reaches a terminal state.
 
         Prefer :meth:`stream` when you want live progress; polling exists for
         reconciliation and for callers that cannot hold a connection open.
         """
-        run = self._client.wait_for_run(self.id, **kwargs)
+        run = self._client.wait_for_run(
+            self.id,
+            timeout=self._timeout if timeout is None else timeout,
+            **kwargs,
+        )
         self.state = run.get("state", self.state)
         return run
 
@@ -75,8 +88,14 @@ class RunHandle(_BaseRunHandle):
 class AsyncRunHandle(_BaseRunHandle):
     """A submitted run, observable through the asynchronous client."""
 
-    def __init__(self, client: "AsyncMakra", admission: AsyncAdmission) -> None:
-        super().__init__(admission)
+    def __init__(
+        self,
+        client: "AsyncMakra",
+        admission: AsyncAdmission,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
+        super().__init__(admission, timeout=timeout)
         self._client = client
 
     async def refresh(self) -> RunView:
@@ -84,8 +103,12 @@ class AsyncRunHandle(_BaseRunHandle):
         self.state = run.get("state", self.state)
         return run
 
-    async def wait(self, **kwargs: Any) -> RunView:
-        run = await self._client.wait_for_run(self.id, **kwargs)
+    async def wait(self, timeout: Optional[float] = None, **kwargs: Any) -> RunView:
+        run = await self._client.wait_for_run(
+            self.id,
+            timeout=self._timeout if timeout is None else timeout,
+            **kwargs,
+        )
         self.state = run.get("state", self.state)
         return run
 

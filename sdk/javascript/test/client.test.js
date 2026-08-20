@@ -63,17 +63,15 @@ test("extract sends the workflow wire payload", async () => {
     executionMode: "sequential",
     config: {
       validation_mode: "repair",
-      memory: { enabled: true, selector_chain_version: "v2" },
       pagination: { enabled: true, additional_pages: 2 },
       crawler: {
         post_ready_wait_ms: 1000,
         proxy: { region: { scope: "country", value: "DE" } },
         recovery: {
-          one_last_retry: true,
-          one_last_retry_delay_ms: null,
+          retry: true,
+          retry_delay_ms: null,
         },
       },
-      audit: { enabled: false, use_cache: true },
     },
   });
 
@@ -85,7 +83,6 @@ test("extract sends the workflow wire payload", async () => {
     execution_mode: "sequential",
     config: {
       validation_mode: "repair",
-      memory: { enabled: true, selector_chain_version: "v2" },
       pagination: { enabled: true, additional_pages: 2 },
       crawler: {
         post_ready_wait_ms: 1000,
@@ -95,7 +92,6 @@ test("extract sends the workflow wire payload", async () => {
           one_last_retry_delay_ms: null,
         },
       },
-      audit: { enabled: false, use_cache: true },
     },
   });
 });
@@ -107,7 +103,7 @@ test("schema sends the workflow wire payload", async () => {
     client.schema({
       url: "https://invalid.example",
       onlyMemoized: true,
-      config: { memory: { enabled: false } },
+      config: { crawler: { post_ready_wait_ms: 0 } },
     }),
     (error) => {
       assert.ok(error instanceof MakraAPIError);
@@ -123,7 +119,7 @@ test("schema sends the workflow wire payload", async () => {
   assert.deepEqual(requests[0].body, {
     url: "https://invalid.example",
     only_memoized: true,
-    config: { memory: { enabled: false } },
+    config: { crawler: { post_ready_wait_ms: 0 } },
   });
 });
 
@@ -139,6 +135,58 @@ test("client-side validation happens before network I/O", async () => {
     /schema must be a non-empty/,
   );
   assert.deepEqual(requests, []);
+});
+
+test("removed config keys fail before network I/O", async () => {
+  const client = new Makra({ apiKey: "test-key", baseUrl });
+
+  await assert.rejects(
+    client.extract({
+      urls: ["https://example.com"],
+      schema: { title: "Title" },
+      config: { memory: { enabled: true } },
+    }),
+    /config.memory is not supported/,
+  );
+  await assert.rejects(
+    client.extract({
+      urls: ["https://example.com"],
+      schema: { title: "Title" },
+      config: { audit: { enabled: true } },
+    }),
+    /config.audit is not supported/,
+  );
+  await assert.rejects(
+    client.extract({
+      urls: ["https://example.com"],
+      schema: { title: "Title" },
+      config: { crawler: { recovery: { one_last_retry: true } } },
+    }),
+    /retry and retry_delay_ms/,
+  );
+  assert.deepEqual(requests, []);
+});
+
+test("workflow timeout scales with pagination and sequential URLs", async () => {
+  const { resolveWorkflowTimeout } = await import("../src/requests.js");
+  const config = { pagination: { enabled: true, additional_pages: 2 } };
+  assert.equal(resolveWorkflowTimeout(undefined, 300_000, { config }), 900_000);
+  assert.equal(resolveWorkflowTimeout(120_000, 300_000, { config }), 120_000);
+  assert.equal(
+    resolveWorkflowTimeout(undefined, 300_000, {
+      config,
+      urlCount: 2,
+      executionMode: "sequential",
+    }),
+    1_800_000,
+  );
+});
+
+test("iso 3166-1 alpha-2 and stream event enums are exported", async () => {
+  const { EventTypes, Iso3166Alpha2, StreamDetailTypes } = await import("../src/index.js");
+  assert.equal(Iso3166Alpha2.DE, "DE");
+  assert.equal(EventTypes.RUN_COMPLETED, "workflow.run.completed");
+  assert.equal(StreamDetailTypes.RUN_TITLE_GENERATED, "run.title_generated");
 });
 
 test("an explicit empty base URL is invalid", () => {

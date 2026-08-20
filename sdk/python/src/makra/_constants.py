@@ -97,16 +97,6 @@ VALIDATION_MODES: FrozenSet[str] = frozenset(
 )
 
 
-class SelectorChainVersions:
-    V1 = "v1"
-    V2 = "v2"
-
-
-SELECTOR_CHAIN_VERSIONS: FrozenSet[str] = frozenset(
-    {SelectorChainVersions.V1, SelectorChainVersions.V2}
-)
-
-
 class ProxyRegionScopes:
     WORLDWIDE = "worldwide"
     CONTINENT = "continent"
@@ -118,6 +108,33 @@ PROXY_REGION_SCOPES: FrozenSet[str] = frozenset(
         ProxyRegionScopes.WORLDWIDE,
         ProxyRegionScopes.CONTINENT,
         ProxyRegionScopes.COUNTRY,
+    }
+)
+
+
+class ProxyContinents:
+    """Continent slugs for ``config.crawler.proxy.region.value``.
+
+    Used when ``scope`` is ``continent``. These are Evomi-style slugs, not
+    UN M49 numeric codes.
+    """
+
+    AFRICA = "africa"
+    ASIA = "asia"
+    EUROPE = "europe"
+    NORTH_AMERICA = "north.america"
+    OCEANIA = "oceania"
+    SOUTH_AMERICA = "south.america"
+
+
+PROXY_CONTINENTS: FrozenSet[str] = frozenset(
+    {
+        ProxyContinents.AFRICA,
+        ProxyContinents.ASIA,
+        ProxyContinents.EUROPE,
+        ProxyContinents.NORTH_AMERICA,
+        ProxyContinents.OCEANIA,
+        ProxyContinents.SOUTH_AMERICA,
     }
 )
 
@@ -153,7 +170,10 @@ TERMINAL_RUN_STATES: FrozenSet[str] = frozenset(
 
 
 class EventTypes:
-    """SSE ``event:`` names emitted on a run's event stream."""
+    """SSE ``event:`` names on a run's public event stream.
+
+    Match with ``event.type == EventTypes.RUN_COMPLETED``.
+    """
 
     RUN_STARTED = "workflow.run.started"
     RUN_HEARTBEAT = "workflow.run.heartbeat"
@@ -176,6 +196,37 @@ TERMINAL_EVENT_TYPES: FrozenSet[str] = frozenset(
         EventTypes.RUN_BUDGET_EXHAUSTED,
     }
 )
+
+
+class StreamDetailTypes:
+    """Fine-grained ``payload.stream_event_type`` values (``event.detail_type``).
+
+    Match with ``event.detail_type == StreamDetailTypes.RUN_TITLE_GENERATED``.
+    """
+
+    RUN_STARTED = "run.started"
+    RUN_STATUS_CHANGED = "run.status_changed"
+    RUN_COMPLETED = "run.completed"
+    RUN_FAILED = "run.failed"
+    RUN_CANCELLED = "run.cancelled"
+    RUN_BUDGET_EXHAUSTED = "run.budget_exhausted"
+    RUN_TITLE_GENERATED = "run.title_generated"
+    STAGE_STARTED = "stage.started"
+    STAGE_PROGRESS = "stage.progress"
+    STAGE_COMPLETED = "stage.completed"
+    STAGE_FAILED = "stage.failed"
+    STAGE_SKIPPED = "stage.skipped"
+    ACTIVITY_STARTED = "activity.started"
+    ACTIVITY_UPDATED = "activity.updated"
+    ACTIVITY_OUTPUT_DELTA = "activity.output_delta"
+    ACTIVITY_COMPLETED = "activity.completed"
+    ACTIVITY_FAILED = "activity.failed"
+    MESSAGE_STARTED = "message.started"
+    MESSAGE_DELTA = "message.delta"
+    MESSAGE_COMPLETED = "message.completed"
+    RESULT_PARTIAL = "result.partial"
+    RESULT_COMPLETED = "result.completed"
+    DIAGNOSTIC = "diagnostic"
 
 # --- Error codes -----------------------------------------------------------
 

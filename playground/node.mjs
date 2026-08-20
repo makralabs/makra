@@ -21,7 +21,6 @@ if (url) {
     },
     config: {
       validation_mode: "repair",
-      memory: { enabled: true, selector_chain_version: "v2" },
     },
   });
   console.log("extract:", JSON.stringify(result, null, 2));
