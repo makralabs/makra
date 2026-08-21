@@ -1,159 +1,162 @@
-# Makra - Quick Usage
+<p align="center">
+  <img src="assets/makralabs-lockup.svg" alt="Makralabs" width="360" />
+</p>
 
-Makra lets you extract structured data from any website with just a few lines of Python. You can extract links, content, run natural language queries, or provide example data or schemas.
+<p align="center">
+  Structured web data for software that needs an answer, not a browser tab.
+</p>
 
-First, install the Python SDK (see SDK README for details).
+Makra is a client library for the Makra web extraction API. Give it a URL and a description of the data you need. Makra fetches the page, finds the relevant content, and returns the API response as structured JSON.
 
-## Basic Usage
+This repository contains the official Python and JavaScript SDKs, their shared contract, and small scripts for trying the API against a local gateway.
+
+## What you can do
+
+- Extract a known shape from one page or many pages.
+- Ask Makra to describe a page before you write an extraction shape.
+- Stream run progress to a user interface or log.
+- Submit work that outlives the current process, then retrieve it by run ID.
+
+Makra handles page access remotely. The SDK validates your request, sends it to the Makra API, and returns successful response bodies without reshaping them.
+
+## Install an SDK
+
+Python requires Python 3.9 or later:
+
+```bash
+pip install makra
+```
+
+JavaScript requires Node.js 18 or later and uses ESM:
+
+```bash
+npm install makra
+```
+
+Set your API key before you run either example:
+
+```bash
+export MAKRA_API_KEY="your-api-key"
+```
+
+## Extract data
+
+The `schema` is a JSON object or array that describes the data you want. Its strings tell Makra what each field means on the page.
+
+### Python
 
 ```python
 from makra import Makra
-import asyncio
 
-makra = Makra(api_key="YOUR_API_KEY")
+product = {
+    "name": "Product name",
+    "price": "Current displayed price",
+    "in_stock": "Whether the product can be purchased",
+}
 
-async def main():
-    # Crawl a page for links
-    links = await makra.crawl(urls=["https://example.com"])
-
-    # Convert a web page to markdown or text
-    content = await makra.format(
-        urls=["https://example.com"],
-        type="markdown/text"
+with Makra() as makra:
+    response = makra.extract(
+        ["https://example.com/products/widget"],
+        product,
     )
 
-    # Get all repositories with selected fields using a natural language query
-    repos = await makra.extract(
-        urls=["https://github.com/ritsource"],
-        query="Get all the title, link, and language for all repositories."
-    )
-
-    # Map a page's structure
-    page_map = await makra.page_map(urls=["https://example.com"])
-
-    # Pre-process and annotate a page (extracts content and saves annotations)
-    result = await makra.pre_process(
-        urls=["https://example.com"]
-    )
-
-asyncio.run(main())
+print(response)
 ```
 
-## Advanced: Use Namespaces & Providers
+### JavaScript
 
-If you need to specify a custom LLM provider or manage multi-user data separation:
+```js
+import { Makra } from "makra";
+
+const makra = new Makra();
+const response = await makra.extract({
+  urls: ["https://example.com/products/widget"],
+  schema: {
+    name: "Product name",
+    price: "Current displayed price",
+    in_stock: "Whether the product can be purchased",
+  },
+});
+
+console.log(response);
+```
+
+Use a list with one object template for repeated data:
+
+```json
+{
+  "products": [
+    {
+      "name": "Product title",
+      "price": "Current displayed price",
+      "url": "Absolute product URL"
+    }
+  ]
+}
+```
+
+## Choose how a workflow returns
+
+| Need | Use | Python | JavaScript |
+| --- | --- | --- | --- |
+| The result in the current request | Blocking | `extract`, `schema` | `extract`, `schema` |
+| Live progress | Streaming | `extract_stream`, `schema_stream` | `extractStream`, `schemaStream` |
+| Work that may outlive this process | Deferred | `submit_extract`, `submit_schema` | `submitExtract`, `submitSchema` |
+
+Streams report lifecycle and progress events. They do not contain the final result. Read the run ID from an event and retrieve the stored result after the run reaches a terminal event.
 
 ```python
-from makra import Makra
-import os
+with Makra() as makra:
+    run = makra.submit_extract(
+        ["https://example.com/products"],
+        {"products": [{"name": "Product name", "price": "Current price"}]},
+    )
 
-makra = Makra(api_key=os.getenv("MAKRA_API_KEY"))
-provider = Makra.providers.Groq(api_key="YOUR_GROQ_API_KEY")
-
-ns = makra.namespace(key="user-namespace-123", provider=provider)
-result = await ns.extract(
-    urls=["https://github.com/ritsource"],
-    query="List repository titles and languages."
-)
+    run.wait()
+    result = run.result()
 ```
 
-> See the SDK examples for more advanced scenarios and options.
+Run IDs are durable. Store one with your own job record, then resume it later with `get_run`, `wait_for_run`, `stream_run_events`, or `get_run_result`.
 
-# Running the Project in Development Mode
+## Repository layout
 
-## Prerequisites
+| Path | Purpose |
+| --- | --- |
+| [`sdk/python`](sdk/python) | Python package, synchronous and `asyncio` clients, type hints, and tests. |
+| [`sdk/javascript`](sdk/javascript) | ESM JavaScript package with TypeScript declarations and tests. |
+| [`sdk/SPEC.md`](sdk/SPEC.md) | Language-neutral SDK contract. |
+| [`playground`](playground) | Small Python and Node.js scripts for a local API gateway. |
 
--   **Docker** and **Docker Compose** installed ([see Docker docs](https://docs.docker.com/get-docker/))
--   **Make** utility (usually available by default on Unix-like systems)
--   Clone this repository and navigate to its root in your terminal
+## Work on the SDK locally
 
-## Available Services
+Install the Python package in editable mode from this repository:
 
-This project is composed of several services managed via `docker-compose.yaml` and invoked conveniently using the provided `Makefile`:
-
--   **chromadb**: Vector database for embeddings
--   **mongodb**: Document database used for persistent storage
--   **marcus**: Local text-embedding service used by the development configuration
--   **morpheus_js_build**: One-shot build of the JavaScript bundle that Morpheus injects into browser pages
--   **morpheus**: The primary API and Playwright browser-pool server
--   **telemetry_web_build**: One-shot Vite build of the telemetry web application
--   **telemetry**: Go server that serves telemetry APIs and the built web application
-
-Morpheus owns its Playwright browser pool in-process. There is no separate Moleman container.
-
-## Local environment
-
-Compose uses the existing package-level environment files. It does not forward the entire host environment.
-
-The following files provide service credentials and provider settings:
-
-- `packages/shared/libutils/config/.env` is supplied to Marcus and Morpheus. It holds Morpheus service, provider, proxy, and optional S3 settings.
-- `packages/telemetry/.env` is supplied to telemetry after the shared settings. It holds Clerk and telemetry authorization settings and may override a shared value when necessary.
-
-Morpheus receives its Docker-network addresses (`mongodb`, `chromadb`, and `marcus`) directly from Compose. Telemetry receives the private `http://morpheus:6900` bridge address directly from Compose. Those internal coordinates intentionally override any host-local values in the environment files.
-
-MongoDB credentials default to the local-only `admin` / `password` pair. Set `MONGO_USER` and `MONGO_PASSWORD` in the shell to override both Mongo initialization and Morpheus's connection settings.
-
-Validate the Compose syntax before starting:
-
-```sh
-make compose-config
+```bash
+python -m pip install -e sdk/python
+python playground/python.py https://example.com
 ```
 
-## How to Start Everything for Local Development
+The Node.js playground imports the local SDK source directly:
 
-The recommended approach is to spin up **all** services at once:
-
-```sh
-make all
+```bash
+node playground/node.mjs https://example.com
 ```
 
-This builds both frontend artifacts and starts every service in dependency order. MongoDB, ChromaDB, Marcus, Morpheus, and telemetry each have readiness checks; Morpheus waits for its databases, Marcus, and JavaScript bundle, while telemetry waits for Morpheus and its Vite bundle.
+Without a URL, either playground script calls `ping` only. Both default to `http://localhost:8080` and the development API key. Override either value with `MAKRA_BASE_URL` or `MAKRA_API_KEY`.
 
-For a detached stack:
+Run package checks from their package directories:
 
-```sh
-make all ARGS=-d
+```bash
+cd sdk/python && uv run pytest
+cd sdk/javascript && npm test && npm run typecheck
 ```
 
-Local endpoints are available only on loopback:
+## Documentation
 
-- `http://127.0.0.1:6900/ready` — Morpheus readiness
-- `http://127.0.0.1:6910/ping` — Marcus health
-- `http://127.0.0.1:6940/telemetry` — telemetry UI
-- `http://127.0.0.1:6940/telemetry/api/v1/health` — telemetry health
-- `127.0.0.1:8000` — ChromaDB diagnostics
-- `127.0.0.1:27017` — MongoDB diagnostics
+Read the [Makra SDK documentation](https://docs.makralabs.org/makra-sdk/v0.0.3-beta/getting-started/introduction) for setup, workflow guidance, run management, configuration, and the complete Python and JavaScript references.
 
----
+Each SDK package also has its own focused README: [Python](sdk/python/README.md) and [JavaScript](sdk/javascript/README.md).
 
-## Running Specific Service Groups
+## License
 
-### To Run Only the Databases
-
-Launches `chromadb` and `mongodb` containers:
-
-```sh
-make databases
-```
-
-### To Run Only All Server Backends
-
-Builds the two frontend artifacts and starts Marcus, Morpheus, and telemetry. Compose also starts their database dependencies:
-
-```sh
-make servers
-```
-
-## Operations
-
-Inspect service state and logs with:
-
-```sh
-docker compose ps
-docker compose logs -f morpheus telemetry
-```
-
-Stop the stack with `docker compose down`. This preserves MongoDB, ChromaDB, and telemetry data in their host-mounted directories. Avoid `docker compose down -v` unless intentionally discarding generated build volumes.
-
-For any custom orchestration, see the `Makefile` and `docker-compose.yaml` for more details.
+The Python and JavaScript SDK packages are released under the MIT License. See [the Python license](sdk/python/LICENSE) and [the JavaScript license](sdk/javascript/LICENSE).

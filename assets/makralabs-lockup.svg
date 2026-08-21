@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 96" role="img" aria-labelledby="title">
+  <title id="title">Makralabs</title>
+  <g transform="translate(8 8) scale(.118)" fill="#41743a" stroke="#41743a" stroke-linecap="round">
+    <line x1="556.715" y1="396.875" x2="653.788" y2="422.884" stroke-width="50"/>
+    <line x1="498.485" y1="497.743" x2="569.548" y2="568.806" stroke-width="50"/>
+    <line x1="180.289" y1="497.743" x2="109.226" y2="568.806" stroke-width="50"/>
+    <line x1="122.059" y1="396.875" x2="24.986" y2="422.884" stroke-width="50"/>
+    <line x1="122.059" y1="280.415" x2="24.986" y2="254.406" stroke-width="50"/>
+    <line x1="180.289" y1="179.547" x2="109.226" y2="108.484" stroke-width="50"/>
+    <line x1="498.485" y1="179.547" x2="569.548" y2="108.484" stroke-width="50"/>
+    <line x1="556.715" y1="280.415" x2="653.788" y2="254.406" stroke-width="50"/>
+    <path d="M338.932 88.8096C477.003 88.8096 588.932 200.738 588.932 338.81C588.932 476.881 477.003 588.81 338.932 588.81C200.86 588.81 88.9316 476.881 88.9316 338.81C88.9316 200.738 200.86 88.8096 338.932 88.8096ZM339.387 138.645C228.93 138.645 139.387 228.188 139.387 338.645C139.387 449.101 228.93 538.645 339.387 538.645C449.844 538.645 539.387 449.101 539.387 338.645C539.387 228.188 449.844 138.645 339.387 138.645Z" stroke="none"/>
+    <circle cx="339.387" cy="338.645" r="150" stroke="none"/>
+  </g>
+  <text x="104" y="62" fill="#41743a" font-family="Cormorant Garamond, EB Garamond, Georgia, serif" font-size="58" font-weight="600" letter-spacing="-2.5">Makra</text>
+  <text x="256" y="62" fill="#646464" font-family="Cormorant Garamond, EB Garamond, Georgia, serif" font-size="58" font-weight="600" letter-spacing="-2.5">labs</text>
+</svg>
