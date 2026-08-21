@@ -1,0 +1,17 @@
+{
+  "include": ["src", "tests"],
+  "exclude": [".venv", "**/__pycache__"],
+  "pythonVersion": "3.9",
+  "typeCheckingMode": "strict",
+  "reportUnnecessaryIsInstance": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "reportMissingParameterType": false,
+      "reportUnknownParameterType": false
+    }
+  ]
+}

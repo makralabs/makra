@@ -9,6 +9,16 @@ from __future__ import annotations
 
 from typing import FrozenSet
 
+
+class _Iso3166Meta(type):
+    """Unknown class attributes are ISO codes, set dynamically below."""
+
+    def __getattr__(cls, name: str) -> str:
+        raise AttributeError(
+            "{!r} object has no attribute {!r}".format(cls.__name__, name)
+        )
+
+
 # Officially assigned ISO 3166-1 alpha-2 codes, plus XK (Kosovo, commonly
 # used by proxy providers even though it is user-assigned).
 ISO_3166_ALPHA2_CODES: FrozenSet[str] = frozenset(
@@ -43,7 +53,7 @@ ISO_3166_ALPHA2_CODES: FrozenSet[str] = frozenset(
 )
 
 
-class Iso3166Alpha2:
+class Iso3166Alpha2(metaclass=_Iso3166Meta):
     """ISO 3166-1 alpha-2 country codes.
 
     Use as ``config.crawler.proxy.region.value`` when the region scope is
@@ -55,7 +65,9 @@ class Iso3166Alpha2:
     """
 
 
-for _code in sorted(ISO_3166_ALPHA2_CODES):
-    setattr(Iso3166Alpha2, _code, _code)
+def _install_iso3166_attributes() -> None:
+    for code in sorted(ISO_3166_ALPHA2_CODES):
+        setattr(Iso3166Alpha2, code, code)
 
-del _code
+
+_install_iso3166_attributes()

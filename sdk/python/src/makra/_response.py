@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Mapping, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from ._constants import HEADER_REQUEST_ID, HEADER_RETRY_AFTER
 from ._errors import MakraAPIError, build_api_error
@@ -42,6 +43,23 @@ def api_error(
         request_id=_header(headers, HEADER_REQUEST_ID),
         retry_after=parse_retry_after(_header(headers, HEADER_RETRY_AFTER)),
     )
+
+
+def sanitize_result_location(url: str) -> Optional[str]:
+    """Return scheme, host, and path only — never a presigned query string."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def is_supported_result_location(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return parts.scheme in {"http", "https"} and bool(parts.netloc)
 
 
 def _header(headers: Mapping[str, str], name: str) -> Optional[str]:

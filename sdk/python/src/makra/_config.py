@@ -24,8 +24,12 @@ from ._constants import (
     ENV_BASE_URL,
     ENV_MAX_RETRIES,
     ENV_TIMEOUT,
+    HEADER_ACCEPT,
     HEADER_API_KEY,
+    HEADER_CONTENT_TYPE,
+    HEADER_USER_AGENT,
     PRODUCTION_BASE_URL,
+    RESERVED_REQUEST_HEADERS,
     USER_AGENT,
 )
 
@@ -47,9 +51,9 @@ class ClientConfig:
         """Headers sent on every request, including health checks."""
         headers = {
             HEADER_API_KEY: self.api_key,
-            "Content-Type": CONTENT_TYPE_JSON,
-            "Accept": CONTENT_TYPE_JSON,
-            "User-Agent": USER_AGENT,
+            HEADER_CONTENT_TYPE: CONTENT_TYPE_JSON,
+            HEADER_ACCEPT: CONTENT_TYPE_JSON,
+            HEADER_USER_AGENT: USER_AGENT,
         }
         headers.update(self.default_headers)
         return headers
@@ -102,8 +106,45 @@ def resolve_config(
         retry_backoff=_positive(
             "retry_backoff", retry_backoff, None, DEFAULT_RETRY_BACKOFF
         ),
-        default_headers=dict(default_headers or {}),
+        default_headers=_validated_default_headers(default_headers),
     )
+
+
+def _validated_default_headers(
+    default_headers: Optional[Mapping[str, str]],
+) -> Dict[str, str]:
+    if default_headers is None:
+        return {}
+    if not isinstance(default_headers, Mapping):
+        raise ValueError("default_headers must be a mapping of strings")
+    resolved: Dict[str, str] = {}
+    for key, value in default_headers.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError("default_headers keys and values must be strings")
+        reserved = key.lower()
+        if reserved in RESERVED_REQUEST_HEADERS:
+            raise ValueError(
+                "default_headers must not include reserved header {!r}; {}".format(
+                    key, _reserved_header_hint(reserved)
+                )
+            )
+        resolved[key] = value
+    return resolved
+
+
+_RESERVED_HEADER_HINTS = {
+    "api-key": "pass api_key to the Makra constructor",
+    "content-type": "the SDK sets Content-Type automatically",
+    "accept": "the SDK sets Accept automatically (text/event-stream for streaming methods)",
+    "user-agent": "the SDK sets User-Agent automatically",
+    "idempotency-key": "pass idempotency_key to the workflow method",
+    "prefer": "use submit_extract or submit_schema for deferred runs",
+    "last-event-id": "pass last_event_id to stream_run_events",
+}
+
+
+def _reserved_header_hint(name: str) -> str:
+    return _RESERVED_HEADER_HINTS.get(name, "this header is owned by the SDK")
 
 
 def _normalize_base_url(value: object) -> str:
@@ -120,6 +161,8 @@ def _coerce(name: str, explicit: object, from_env: object, default: float) -> fl
     for value in (explicit, from_env):
         if value is None:
             continue
+        if isinstance(value, bool):
+            raise ValueError("{} must be a number".format(name))
         try:
             return float(value)  # type: ignore[arg-type]
         except (TypeError, ValueError):

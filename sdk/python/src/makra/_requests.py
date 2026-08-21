@@ -9,18 +9,34 @@ invents constraints of its own.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Union
 
 from ._constants import (
     EXECUTION_MODES,
+    FEATURES,
+    LIST_RUNS_MAX_LIMIT,
+    LIST_RUNS_MIN_LIMIT,
     PROXY_CONTINENTS,
     PROXY_REGION_SCOPES,
+    RUN_STATES,
     VALIDATION_MODES,
     ExecutionModes,
     ProxyRegionScopes,
 )
 from ._iso3166 import ISO_3166_ALPHA2_CODES
+from ._options import ExtractOptions, SchemaOptions
 from ._types import ExtractConfig, JsonSchema, SchemaConfig
+
+ExtractConfigInput = Union[ExtractConfig, ExtractOptions]
+SchemaConfigInput = Union[SchemaConfig, SchemaOptions]
+
+# Keys the contract removed from the public config object. Unknown keys that
+# are not in these sets are forwarded so future server flags can be used
+# before an SDK release.
+REMOVED_COMMON_CONFIG_KEYS: FrozenSet[str] = frozenset(
+    {"memory", "selector_chain_version"}
+)
+REMOVED_EXTRACT_CONFIG_KEYS: FrozenSet[str] = frozenset({"audit"})
 
 
 def build_extract_payload(
@@ -28,7 +44,7 @@ def build_extract_payload(
     schema: JsonSchema,
     *,
     execution_mode: str,
-    config: Optional[ExtractConfig],
+    config: Optional[ExtractConfigInput],
     stream: bool = False,
 ) -> Dict[str, Any]:
     """Build the ``POST /workflows/extract`` body."""
@@ -38,7 +54,7 @@ def build_extract_payload(
         "execution_mode": _validated_choice(
             "execution_mode", execution_mode, EXECUTION_MODES
         ),
-        "config": _validated_extract_config(config),
+        "config": _validated_extract_config(_as_config_mapping(config)),
     }
     if stream:
         payload["stream"] = True
@@ -49,7 +65,7 @@ def build_schema_payload(
     url: str,
     *,
     only_memoized: bool,
-    config: Optional[SchemaConfig],
+    config: Optional[SchemaConfigInput],
     stream: bool = False,
 ) -> Dict[str, Any]:
     """Build the ``POST /workflows/schema`` body."""
@@ -60,7 +76,9 @@ def build_schema_payload(
     payload: Dict[str, Any] = {
         "url": url,
         "only_memoized": only_memoized,
-        "config": _validated_common_config(config, path="config"),
+        "config": _validated_common_config(
+            _as_config_mapping(config), path="config"
+        ),
     }
     if stream:
         payload["stream"] = True
@@ -88,7 +106,7 @@ def resolve_workflow_timeout(
     share wall-clock, so they do not multiply the budget.
     """
     if explicit is not None:
-        return explicit
+        return require_positive_number("timeout", explicit)
     pages = 1
     pagination = config.get("pagination") if isinstance(config, Mapping) else None
     if isinstance(pagination, Mapping) and pagination.get("enabled"):
@@ -101,6 +119,88 @@ def resolve_workflow_timeout(
         else 1
     )
     return base * pages * urls
+
+
+def validate_optional_timeout(timeout: Optional[float]) -> Optional[float]:
+    if timeout is None:
+        return None
+    return require_positive_number("timeout", timeout)
+
+
+def validate_optional_poll_interval(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    return require_positive_number("poll_interval", value)
+
+
+def validate_last_event_id(value: object) -> int:
+    return require_non_negative_int("last_event_id", value)
+
+
+def validate_run_id(run_id: object) -> str:
+    return require_non_empty_string("run_id", run_id)
+
+
+def validate_idempotency_key(key: Optional[str]) -> Optional[str]:
+    if key is None:
+        return None
+    return require_non_empty_string("idempotency_key", key)
+
+
+def validate_list_runs_args(
+    limit: Optional[int],
+    cursor: Optional[str],
+    feature: Optional[str],
+    state: Optional[str],
+) -> None:
+    if limit is not None:
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise ValueError("limit must be an integer")
+        if not LIST_RUNS_MIN_LIMIT <= limit <= LIST_RUNS_MAX_LIMIT:
+            raise ValueError(
+                "limit must be between {} and {}".format(
+                    LIST_RUNS_MIN_LIMIT, LIST_RUNS_MAX_LIMIT
+                )
+            )
+    if cursor is not None and not isinstance(cursor, str):
+        raise ValueError("cursor must be a string")
+    if feature is not None:
+        _validated_choice("feature", feature, FEATURES)
+    if state is not None:
+        _validated_choice("state", state, RUN_STATES)
+
+
+def require_positive_number(name: str, value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("{} must be a number".format(name))
+    number = float(value)
+    if number <= 0:
+        raise ValueError("{} must be greater than 0".format(name))
+    return number
+
+
+def require_non_negative_int(name: str, value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("{} must be an integer".format(name))
+    if value < 0:
+        raise ValueError("{} must not be negative".format(name))
+    return value
+
+
+def require_non_empty_string(name: str, value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("{} must be a non-empty string".format(name))
+    return value
+
+
+def _as_config_mapping(
+    config: Optional[Union[Mapping[str, Any], SchemaOptions, ExtractOptions]],
+) -> Optional[Mapping[str, Any]]:
+    if config is None:
+        return None
+    if isinstance(config, (ExtractOptions, SchemaOptions)):
+        return config.to_config()
+    return config
 
 
 def _validated_urls(urls: Sequence[str]) -> List[str]:
@@ -120,10 +220,9 @@ def _validated_schema(schema: JsonSchema) -> JsonSchema:
     return schema
 
 
-def _validated_extract_config(config: Optional[ExtractConfig]) -> Dict[str, Any]:
+def _validated_extract_config(config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     resolved = _validated_common_config(config, path="config")
-    if "audit" in resolved:
-        raise ValueError("config.audit is not supported")
+    _reject_removed_keys(resolved, REMOVED_EXTRACT_CONFIG_KEYS)
     mode = resolved.get("validation_mode", _MISSING)
     if mode is not _MISSING and mode is not None:
         _validated_choice("config.validation_mode", mode, VALIDATION_MODES)
@@ -140,12 +239,17 @@ def _validated_common_config(
     if not isinstance(config, Mapping):
         raise ValueError("{} must be a mapping".format(path))
     resolved = dict(config)
-    if "memory" in resolved:
-        raise ValueError("config.memory is not supported")
+    _reject_removed_keys(resolved, REMOVED_COMMON_CONFIG_KEYS)
     crawler = resolved.get("crawler")
     if crawler is not None:
         resolved["crawler"] = _normalized_crawler(crawler)
     return resolved
+
+
+def _reject_removed_keys(config: Mapping[str, Any], keys: FrozenSet[str]) -> None:
+    for key in keys:
+        if key in config:
+            raise ValueError("config.{} is not supported".format(key))
 
 
 def _normalized_crawler(crawler: Any) -> Dict[str, Any]:
@@ -276,7 +380,7 @@ def _validate_bounded_ms(value: Any, path: str, maximum: int) -> None:
         raise ValueError("{} must be between 0 and {}".format(path, maximum))
 
 
-def _validated_choice(name: str, value: Any, allowed: "frozenset[str]") -> str:
+def _validated_choice(name: str, value: Any, allowed: FrozenSet[str]) -> str:
     if value not in allowed:
         raise ValueError(
             "{} must be one of: {}".format(name, ", ".join(sorted(allowed)))

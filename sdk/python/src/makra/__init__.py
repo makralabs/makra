@@ -40,7 +40,6 @@ from ._constants import (
     StreamDetailTypes,
     ValidationModes,
 )
-from ._iso3166 import ISO_3166_ALPHA2_CODES, Iso3166Alpha2
 from ._errors import (
     MakraAPIError,
     MakraAuthenticationError,
@@ -51,13 +50,16 @@ from ._errors import (
     MakraNotFoundError,
     MakraPermissionError,
     MakraRateLimitError,
+    MakraResultError,
     MakraRunFailedError,
     MakraServerError,
     MakraStreamError,
     MakraTimeoutError,
 )
 from ._events import WorkflowEvent
-from ._runs import AsyncRunHandle, RunHandle
+from ._iso3166 import ISO_3166_ALPHA2_CODES, Iso3166Alpha2
+from ._options import ExtractOptions, ProxyRegion, SchemaOptions
+from ._runs import AsyncRunHandle, RunHandle, run_is_terminal, run_succeeded
 from ._types import (
     AsyncAdmission,
     CommonConfig,
@@ -65,19 +67,25 @@ from ._types import (
     CrawlerRecoveryConfig,
     ExecutionMode,
     ExtractConfig,
+    ExtractResponse,
     Feature,
+    HealthResponse,
     JsonSchema,
     PaginationConfig,
     ProxyConfig,
     ProxyContinent,
     ProxyRegionConfig,
     ProxyRegionScope,
+    ResponseBody,
     RunPage,
+    RunResult,
     RunState,
     RunView,
     SchemaConfig,
+    SchemaResponse,
     TitleConfig,
     ValidationMode,
+    WorkflowEnvelope,
 )
 
 __version__ = SDK_VERSION
@@ -92,6 +100,12 @@ __all__ = [
     "RunHandle",
     "AsyncRunHandle",
     "WorkflowEvent",
+    "run_is_terminal",
+    "run_succeeded",
+    # Options
+    "ExtractOptions",
+    "SchemaOptions",
+    "ProxyRegion",
     # Errors
     "MakraError",
     "MakraAPIError",
@@ -105,6 +119,7 @@ __all__ = [
     "MakraConnectionError",
     "MakraTimeoutError",
     "MakraStreamError",
+    "MakraResultError",
     "MakraRunFailedError",
     # Constants
     "SDK_VERSION",
@@ -132,6 +147,12 @@ __all__ = [
     "ProxyContinent",
     "Feature",
     "RunState",
+    "ResponseBody",
+    "HealthResponse",
+    "WorkflowEnvelope",
+    "ExtractResponse",
+    "SchemaResponse",
+    "RunResult",
     "CommonConfig",
     "ExtractConfig",
     "SchemaConfig",

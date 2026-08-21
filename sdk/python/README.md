@@ -51,14 +51,33 @@ extracts scale that budget automatically unless you pass `timeout` yourself.
 ```python
 from makra import (
     EventTypes,
+    ExtractOptions,
     Iso3166Alpha2,
     Makra,
     ProxyContinents,
+    ProxyRegion,
     ProxyRegionScopes,
     StreamDetailTypes,
     ValidationModes,
 )
 
+data = client.extract(
+    urls=["https://example.com/products"],
+    schema={"products": [{"name": "string", "price": "number"}]},
+    config=ExtractOptions(
+        validation_mode=ValidationModes.REPAIR,
+        additional_pages=2,
+        proxy_region=ProxyRegion.country(Iso3166Alpha2.DE),
+        recovery_retry=True,
+        recovery_retry_delay_ms=2000,
+    ),
+    timeout=120,
+)
+```
+
+Nested dictionaries remain supported and produce the same wire payload:
+
+```python
 data = client.extract(
     urls=["https://example.com/products"],
     schema={"products": [{"name": "string", "price": "number"}]},
@@ -75,7 +94,6 @@ data = client.extract(
             "recovery": {"retry": True, "retry_delay_ms": 2000},
         },
     },
-    timeout=120,
 )
 ```
 
@@ -138,6 +156,17 @@ run.wait()                        # polls until terminal
 data = run.result()
 ```
 
+Use `run_is_terminal` and `run_succeeded` when you have a run mapping and need
+to distinguish infrastructure completion from domain success. A completed run
+with no `success` field is treated as successful; `success: false` is not.
+
+```python
+from makra import run_is_terminal, run_succeeded
+
+if run_is_terminal(snapshot) and run_succeeded(snapshot):
+    data = client.get_run_result(snapshot["id"])
+```
+
 A handle also supports `refresh()`, `stream()`, and `cancel()`. Everything a
 handle does is available directly on the client too — `get_run`, `list_runs`,
 `wait_for_run`, `stream_run_events`, `get_run_result`, `cancel_run` — so a run
@@ -162,6 +191,11 @@ Settings resolve as **explicit argument → environment variable → default**.
 | `stream_idle_timeout` | — | `90` |
 | `retry_backoff` | — | `0.5` |
 | `default_headers` | — | `{}` |
+
+`default_headers` may add tracing or application headers. It cannot override
+SDK-owned names (`Api-Key`, `Content-Type`, `Accept`, `User-Agent`,
+`Idempotency-Key`, `Prefer`, `Last-Event-ID`); pass `api_key`,
+`idempotency_key`, or `last_event_id` instead.
 
 ```python
 from makra import DEVELOPMENT_BASE_URL, Makra
@@ -200,8 +234,15 @@ MakraError
 ├── MakraConnectionError              the request never reached the API
 │   └── MakraTimeoutError
 ├── MakraStreamError                  .run_id
+│   └── MakraResultError              .run_id .location   (also a MakraStreamError)
 └── MakraRunFailedError               .run_id .state .run
 ```
+
+`MakraResultError` is raised when a stored-result redirect is missing
+`Location` or the location is not an absolute HTTP(S) URL. It subclasses
+`MakraStreamError` so existing stream catches keep working; a future major
+version may reparent it under `MakraError`. Presigned query strings are never
+included in the message or `location`.
 
 Malformed arguments raise `ValueError` before any network call, so a typo in a
 config key costs nothing.

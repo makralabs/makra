@@ -42,7 +42,6 @@ from ._constants import (
     PATH_RUNS,
     PATH_SCHEMA,
     PREFER_RESPOND_ASYNC,
-    TERMINAL_RUN_STATES,
     ExecutionModes,
     RunStates,
     run_path,
@@ -50,29 +49,45 @@ from ._constants import (
 from ._config import ClientConfig, resolve_config
 from ._errors import (
     MakraConnectionError,
+    MakraResultError,
     MakraRunFailedError,
     MakraStreamError,
     MakraTimeoutError,
 )
 from ._events import WorkflowEvent, parse_event
 from ._requests import (
+    ExtractConfigInput,
+    SchemaConfigInput,
     build_extract_payload,
     build_schema_payload,
     new_idempotency_key,
     resolve_workflow_timeout,
+    validate_idempotency_key,
+    validate_last_event_id,
+    validate_list_runs_args,
+    validate_optional_poll_interval,
+    validate_optional_timeout,
+    validate_run_id,
 )
-from ._response import api_error, decode_body
+from ._response import (
+    api_error,
+    decode_body,
+    is_supported_result_location,
+    sanitize_result_location,
+)
 from ._retry import is_retryable_status, retry_delay
-from ._runs import AsyncRunHandle, RunHandle
+from ._runs import AsyncRunHandle, RunHandle, run_is_terminal
 from ._sse import SSEDecoder
 from ._types import (
-    AsyncAdmission,
     ExecutionMode,
-    ExtractConfig,
+    ExtractResponse,
+    HealthResponse,
     JsonSchema,
+    ResponseBody,
     RunPage,
+    RunResult,
     RunView,
-    SchemaConfig,
+    SchemaResponse,
 )
 
 _REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
@@ -162,6 +177,18 @@ class _BaseClient:
             "state": state,
         }
         return {key: value for key, value in params.items() if value is not None}
+
+    def _validated_submit_headers(
+        self,
+        idempotency_key: Optional[str],
+        *,
+        prefer_async: bool = False,
+        stream: bool = False,
+    ) -> Dict[str, str]:
+        validate_idempotency_key(idempotency_key)
+        return self._submit_headers(
+            idempotency_key, prefer_async=prefer_async, stream=stream
+        )
 
     @staticmethod
     def _next_poll_delay(run: Mapping[str, Any], poll_interval: Optional[float]) -> float:
@@ -286,11 +313,11 @@ class Makra(_BaseClient):
 
     # --- Health ------------------------------------------------------------
 
-    def ping(self) -> Any:
+    def ping(self) -> HealthResponse | ResponseBody:
         """Check that the API gateway is reachable."""
         return self._request("GET", PATH_HEALTH, retryable=True)
 
-    def ready(self) -> Any:
+    def ready(self) -> HealthResponse | ResponseBody:
         """Check that result storage is reachable, not just the gateway."""
         return self._request("GET", PATH_READY, retryable=True)
 
@@ -302,10 +329,10 @@ class Makra(_BaseClient):
         schema: JsonSchema,
         *,
         execution_mode: ExecutionMode = ExecutionModes.CONCURRENT,
-        config: Optional[ExtractConfig] = None,
+        config: Optional[ExtractConfigInput] = None,
         idempotency_key: Optional[str] = None,
         timeout: Optional[float] = None,
-    ) -> Any:
+    ) -> ExtractResponse | ResponseBody:
         """Extract structured data and wait for the result.
 
         The connection is held until the run is terminal, so ``timeout`` is
@@ -320,7 +347,7 @@ class Makra(_BaseClient):
             "POST",
             PATH_EXTRACT,
             json=payload,
-            headers=self._submit_headers(idempotency_key),
+            headers=self._validated_submit_headers(idempotency_key),
             timeout=self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
             retryable=True,
         )
@@ -330,10 +357,10 @@ class Makra(_BaseClient):
         url: str,
         *,
         only_memoized: bool = False,
-        config: Optional[SchemaConfig] = None,
+        config: Optional[SchemaConfigInput] = None,
         idempotency_key: Optional[str] = None,
         timeout: Optional[float] = None,
-    ) -> Any:
+    ) -> SchemaResponse | ResponseBody:
         """Build a JSON Schema describing everything one page contains."""
         payload = build_schema_payload(
             url, only_memoized=only_memoized, config=config
@@ -342,7 +369,7 @@ class Makra(_BaseClient):
             "POST",
             PATH_SCHEMA,
             json=payload,
-            headers=self._submit_headers(idempotency_key),
+            headers=self._validated_submit_headers(idempotency_key),
             timeout=self._workflow_timeout(timeout, payload),
             retryable=True,
         )
@@ -355,7 +382,7 @@ class Makra(_BaseClient):
         schema: JsonSchema,
         *,
         execution_mode: ExecutionMode = ExecutionModes.CONCURRENT,
-        config: Optional[ExtractConfig] = None,
+        config: Optional[ExtractConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> Iterator[WorkflowEvent]:
         """Run an extraction and iterate its progress events as they happen.
@@ -367,8 +394,9 @@ class Makra(_BaseClient):
         payload = build_extract_payload(
             urls, schema, execution_mode=execution_mode, config=config, stream=True
         )
+        headers = self._validated_submit_headers(idempotency_key, stream=True)
         return self._stream_events(
-            "POST", PATH_EXTRACT, json=payload, idempotency_key=idempotency_key
+            "POST", PATH_EXTRACT, json=payload, headers=headers
         )
 
     def schema_stream(
@@ -376,23 +404,30 @@ class Makra(_BaseClient):
         url: str,
         *,
         only_memoized: bool = False,
-        config: Optional[SchemaConfig] = None,
+        config: Optional[SchemaConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> Iterator[WorkflowEvent]:
         """Run schema generation and iterate its progress events."""
         payload = build_schema_payload(
             url, only_memoized=only_memoized, config=config, stream=True
         )
+        headers = self._validated_submit_headers(idempotency_key, stream=True)
         return self._stream_events(
-            "POST", PATH_SCHEMA, json=payload, idempotency_key=idempotency_key
+            "POST", PATH_SCHEMA, json=payload, headers=headers
         )
 
     def stream_run_events(
         self, run_id: str, *, last_event_id: int = 0
     ) -> Iterator[WorkflowEvent]:
         """Attach to an existing run's event stream, optionally resuming."""
+        run_id = validate_run_id(run_id)
+        last_event_id = validate_last_event_id(last_event_id)
         return self._stream_events(
-            "GET", run_path(run_id, "/events"), run_id=run_id, last_event_id=last_event_id
+            "GET",
+            run_path(run_id, "/events"),
+            headers={"Accept": CONTENT_TYPE_SSE},
+            run_id=run_id,
+            last_event_id=last_event_id,
         )
 
     # --- Asynchronous submission --------------------------------------------
@@ -403,7 +438,7 @@ class Makra(_BaseClient):
         schema: JsonSchema,
         *,
         execution_mode: ExecutionMode = ExecutionModes.CONCURRENT,
-        config: Optional[ExtractConfig] = None,
+        config: Optional[ExtractConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> RunHandle:
         """Queue an extraction and return immediately with a run handle."""
@@ -421,7 +456,7 @@ class Makra(_BaseClient):
         url: str,
         *,
         only_memoized: bool = False,
-        config: Optional[SchemaConfig] = None,
+        config: Optional[SchemaConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> RunHandle:
         """Queue a schema build and return immediately with a run handle."""
@@ -438,6 +473,7 @@ class Makra(_BaseClient):
 
     def get_run(self, run_id: str) -> RunView:
         """Fetch run metadata. Never the result payload."""
+        run_id = validate_run_id(run_id)
         return self._request("GET", run_path(run_id), retryable=True)
 
     def list_runs(
@@ -449,6 +485,7 @@ class Makra(_BaseClient):
         state: Optional[str] = None,
     ) -> RunPage:
         """List the caller's non-archived runs, newest first."""
+        validate_list_runs_args(limit, cursor, feature, state)
         return self._request(
             "GET",
             PATH_RUNS,
@@ -458,6 +495,7 @@ class Makra(_BaseClient):
 
     def cancel_run(self, run_id: str) -> RunView:
         """Request cancellation of a run. Safe to call more than once."""
+        run_id = validate_run_id(run_id)
         return self._request("POST", run_path(run_id, "/cancel"), retryable=True)
 
     def wait_for_run(
@@ -474,12 +512,15 @@ class Makra(_BaseClient):
         domain failure, not an infrastructure one, so it is returned rather
         than raised.
         """
+        run_id = validate_run_id(run_id)
+        timeout = validate_optional_timeout(timeout)
+        poll_interval = validate_optional_poll_interval(poll_interval)
         deadline = time.monotonic() + (
             timeout if timeout is not None else self._config.timeout
         )
         while True:
             run = self.get_run(run_id)
-            if str(run.get("state", "")) in TERMINAL_RUN_STATES:
+            if run_is_terminal(run):
                 return self._check_terminal_state(run, run_id, raise_on_failure)
             delay = self._next_poll_delay(run, poll_interval)
             if time.monotonic() + delay > deadline:
@@ -490,27 +531,32 @@ class Makra(_BaseClient):
                 )
             time.sleep(delay)
 
-    def get_run_result(self, run_id: str) -> Any:
+    def get_run_result(self, run_id: str) -> RunResult | ResponseBody:
         """Download a terminal run's stored result payload."""
+        run_id = validate_run_id(run_id)
         path = run_path(run_id, "/result")
         response = self._send("GET", path, retryable=True)
         if response.status_code in _REDIRECT_STATUS:
-            return self._download_redirect(response, path)
+            return self._download_redirect(response, path, run_id=run_id)
         return self._decode(response, "GET", path)
 
     # --- Internals ----------------------------------------------------------
 
     def _submit(
         self, path: str, payload: Dict[str, Any], idempotency_key: Optional[str]
-    ) -> AsyncAdmission:
+    ) -> Dict[str, Any]:
         admission = self._request(
             "POST",
             path,
             json=payload,
-            headers=self._submit_headers(idempotency_key, prefer_async=True),
+            headers=self._validated_submit_headers(idempotency_key, prefer_async=True),
             retryable=True,
         )
-        return admission if isinstance(admission, dict) else {}
+        if not isinstance(admission, dict):
+            return {}
+        parsed: Dict[str, Any] = {}
+        parsed.update(admission)
+        return parsed
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self._send(method, path, **kwargs)
@@ -571,7 +617,9 @@ class Makra(_BaseClient):
             return exc
         return MakraStreamError("unexpected error state")  # pragma: no cover
 
-    def _download_redirect(self, response: httpx.Response, path: str) -> Any:
+    def _download_redirect(
+        self, response: httpx.Response, path: str, *, run_id: str
+    ) -> RunResult | ResponseBody:
         """Follow a result redirect without leaking credentials to storage.
 
         Production stores results in object storage and redirects to a
@@ -580,7 +628,15 @@ class Makra(_BaseClient):
         """
         location = response.headers.get("location")
         if not location:
-            raise MakraStreamError("Result redirect did not include a location")
+            raise MakraResultError(
+                "Result redirect did not include a location", run_id=run_id
+            )
+        if not is_supported_result_location(location):
+            raise MakraResultError(
+                "Result redirect location is not an absolute HTTP or HTTPS URL",
+                run_id=run_id,
+                location=sanitize_result_location(location),
+            )
         with httpx.Client(timeout=self._request_timeout(None)) as anonymous:
             try:
                 download = anonymous.get(location, follow_redirects=True)
@@ -594,15 +650,11 @@ class Makra(_BaseClient):
         path: str,
         *,
         json: Optional[Dict[str, Any]] = None,
-        idempotency_key: Optional[str] = None,
+        headers: Optional[Mapping[str, str]] = None,
         run_id: Optional[str] = None,
         last_event_id: int = 0,
     ) -> Iterator[WorkflowEvent]:
-        headers = (
-            self._submit_headers(idempotency_key, stream=True)
-            if method == "POST"
-            else {"Accept": CONTENT_TYPE_SSE}
-        )
+        resolved_headers = dict(headers or {"Accept": CONTENT_TYPE_SSE})
         attempt = 0
         while True:
             cause: Optional[Exception] = None
@@ -611,7 +663,7 @@ class Makra(_BaseClient):
                     method,
                     self._config.url(path),
                     json=json,
-                    headers=_with_resume(headers, last_event_id),
+                    headers=_with_resume(resolved_headers, last_event_id),
                     timeout=self._stream_timeout(),
                 ) as response:
                     failure = self._stream_response_error(response, method, path)
@@ -627,7 +679,7 @@ class Makra(_BaseClient):
             except httpx.HTTPError as exc:
                 cause = exc
             # Reaching here means the stream ended without a terminal event.
-            method, path, json, headers = _resume_target(run_id)
+            method, path, json, resolved_headers = _resume_target(run_id)
             attempt += 1
             if run_id is None or attempt > self._config.max_retries:
                 raise MakraStreamError(
@@ -662,10 +714,10 @@ class AsyncMakra(_BaseClient):
 
     # --- Health ------------------------------------------------------------
 
-    async def ping(self) -> Any:
+    async def ping(self) -> HealthResponse | ResponseBody:
         return await self._request("GET", PATH_HEALTH, retryable=True)
 
-    async def ready(self) -> Any:
+    async def ready(self) -> HealthResponse | ResponseBody:
         return await self._request("GET", PATH_READY, retryable=True)
 
     # --- Blocking workflows ------------------------------------------------
@@ -676,10 +728,10 @@ class AsyncMakra(_BaseClient):
         schema: JsonSchema,
         *,
         execution_mode: ExecutionMode = ExecutionModes.CONCURRENT,
-        config: Optional[ExtractConfig] = None,
+        config: Optional[ExtractConfigInput] = None,
         idempotency_key: Optional[str] = None,
         timeout: Optional[float] = None,
-    ) -> Any:
+    ) -> ExtractResponse | ResponseBody:
         payload = build_extract_payload(
             urls, schema, execution_mode=execution_mode, config=config
         )
@@ -687,7 +739,7 @@ class AsyncMakra(_BaseClient):
             "POST",
             PATH_EXTRACT,
             json=payload,
-            headers=self._submit_headers(idempotency_key),
+            headers=self._validated_submit_headers(idempotency_key),
             timeout=self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
             retryable=True,
         )
@@ -697,10 +749,10 @@ class AsyncMakra(_BaseClient):
         url: str,
         *,
         only_memoized: bool = False,
-        config: Optional[SchemaConfig] = None,
+        config: Optional[SchemaConfigInput] = None,
         idempotency_key: Optional[str] = None,
         timeout: Optional[float] = None,
-    ) -> Any:
+    ) -> SchemaResponse | ResponseBody:
         payload = build_schema_payload(
             url, only_memoized=only_memoized, config=config
         )
@@ -708,7 +760,7 @@ class AsyncMakra(_BaseClient):
             "POST",
             PATH_SCHEMA,
             json=payload,
-            headers=self._submit_headers(idempotency_key),
+            headers=self._validated_submit_headers(idempotency_key),
             timeout=self._workflow_timeout(timeout, payload),
             retryable=True,
         )
@@ -721,14 +773,15 @@ class AsyncMakra(_BaseClient):
         schema: JsonSchema,
         *,
         execution_mode: ExecutionMode = ExecutionModes.CONCURRENT,
-        config: Optional[ExtractConfig] = None,
+        config: Optional[ExtractConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> AsyncIterator[WorkflowEvent]:
         payload = build_extract_payload(
             urls, schema, execution_mode=execution_mode, config=config, stream=True
         )
+        headers = self._validated_submit_headers(idempotency_key, stream=True)
         return self._stream_events(
-            "POST", PATH_EXTRACT, json=payload, idempotency_key=idempotency_key
+            "POST", PATH_EXTRACT, json=payload, headers=headers
         )
 
     def schema_stream(
@@ -736,21 +789,28 @@ class AsyncMakra(_BaseClient):
         url: str,
         *,
         only_memoized: bool = False,
-        config: Optional[SchemaConfig] = None,
+        config: Optional[SchemaConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> AsyncIterator[WorkflowEvent]:
         payload = build_schema_payload(
             url, only_memoized=only_memoized, config=config, stream=True
         )
+        headers = self._validated_submit_headers(idempotency_key, stream=True)
         return self._stream_events(
-            "POST", PATH_SCHEMA, json=payload, idempotency_key=idempotency_key
+            "POST", PATH_SCHEMA, json=payload, headers=headers
         )
 
     def stream_run_events(
         self, run_id: str, *, last_event_id: int = 0
     ) -> AsyncIterator[WorkflowEvent]:
+        run_id = validate_run_id(run_id)
+        last_event_id = validate_last_event_id(last_event_id)
         return self._stream_events(
-            "GET", run_path(run_id, "/events"), run_id=run_id, last_event_id=last_event_id
+            "GET",
+            run_path(run_id, "/events"),
+            headers={"Accept": CONTENT_TYPE_SSE},
+            run_id=run_id,
+            last_event_id=last_event_id,
         )
 
     # --- Asynchronous submission --------------------------------------------
@@ -761,7 +821,7 @@ class AsyncMakra(_BaseClient):
         schema: JsonSchema,
         *,
         execution_mode: ExecutionMode = ExecutionModes.CONCURRENT,
-        config: Optional[ExtractConfig] = None,
+        config: Optional[ExtractConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> AsyncRunHandle:
         payload = build_extract_payload(
@@ -779,7 +839,7 @@ class AsyncMakra(_BaseClient):
         url: str,
         *,
         only_memoized: bool = False,
-        config: Optional[SchemaConfig] = None,
+        config: Optional[SchemaConfigInput] = None,
         idempotency_key: Optional[str] = None,
     ) -> AsyncRunHandle:
         payload = build_schema_payload(
@@ -793,6 +853,7 @@ class AsyncMakra(_BaseClient):
     # --- Run management -----------------------------------------------------
 
     async def get_run(self, run_id: str) -> RunView:
+        run_id = validate_run_id(run_id)
         return await self._request("GET", run_path(run_id), retryable=True)
 
     async def list_runs(
@@ -803,6 +864,7 @@ class AsyncMakra(_BaseClient):
         feature: Optional[str] = None,
         state: Optional[str] = None,
     ) -> RunPage:
+        validate_list_runs_args(limit, cursor, feature, state)
         return await self._request(
             "GET",
             PATH_RUNS,
@@ -811,6 +873,7 @@ class AsyncMakra(_BaseClient):
         )
 
     async def cancel_run(self, run_id: str) -> RunView:
+        run_id = validate_run_id(run_id)
         return await self._request("POST", run_path(run_id, "/cancel"), retryable=True)
 
     async def wait_for_run(
@@ -821,12 +884,15 @@ class AsyncMakra(_BaseClient):
         poll_interval: Optional[float] = None,
         raise_on_failure: bool = True,
     ) -> RunView:
+        run_id = validate_run_id(run_id)
+        timeout = validate_optional_timeout(timeout)
+        poll_interval = validate_optional_poll_interval(poll_interval)
         deadline = time.monotonic() + (
             timeout if timeout is not None else self._config.timeout
         )
         while True:
             run = await self.get_run(run_id)
-            if str(run.get("state", "")) in TERMINAL_RUN_STATES:
+            if run_is_terminal(run):
                 return self._check_terminal_state(run, run_id, raise_on_failure)
             delay = self._next_poll_delay(run, poll_interval)
             if time.monotonic() + delay > deadline:
@@ -837,26 +903,31 @@ class AsyncMakra(_BaseClient):
                 )
             await asyncio.sleep(delay)
 
-    async def get_run_result(self, run_id: str) -> Any:
+    async def get_run_result(self, run_id: str) -> RunResult | ResponseBody:
+        run_id = validate_run_id(run_id)
         path = run_path(run_id, "/result")
         response = await self._send("GET", path, retryable=True)
         if response.status_code in _REDIRECT_STATUS:
-            return await self._download_redirect(response, path)
+            return await self._download_redirect(response, path, run_id=run_id)
         return self._decode(response, "GET", path)
 
     # --- Internals ----------------------------------------------------------
 
     async def _submit(
         self, path: str, payload: Dict[str, Any], idempotency_key: Optional[str]
-    ) -> AsyncAdmission:
+    ) -> Dict[str, Any]:
         admission = await self._request(
             "POST",
             path,
             json=payload,
-            headers=self._submit_headers(idempotency_key, prefer_async=True),
+            headers=self._validated_submit_headers(idempotency_key, prefer_async=True),
             retryable=True,
         )
-        return admission if isinstance(admission, dict) else {}
+        if not isinstance(admission, dict):
+            return {}
+        parsed: Dict[str, Any] = {}
+        parsed.update(admission)
+        return parsed
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         response = await self._send(method, path, **kwargs)
@@ -917,10 +988,20 @@ class AsyncMakra(_BaseClient):
             return exc
         return MakraStreamError("unexpected error state")  # pragma: no cover
 
-    async def _download_redirect(self, response: httpx.Response, path: str) -> Any:
+    async def _download_redirect(
+        self, response: httpx.Response, path: str, *, run_id: str
+    ) -> RunResult | ResponseBody:
         location = response.headers.get("location")
         if not location:
-            raise MakraStreamError("Result redirect did not include a location")
+            raise MakraResultError(
+                "Result redirect did not include a location", run_id=run_id
+            )
+        if not is_supported_result_location(location):
+            raise MakraResultError(
+                "Result redirect location is not an absolute HTTP or HTTPS URL",
+                run_id=run_id,
+                location=sanitize_result_location(location),
+            )
         async with httpx.AsyncClient(
             timeout=self._request_timeout(None)
         ) as anonymous:
@@ -936,15 +1017,11 @@ class AsyncMakra(_BaseClient):
         path: str,
         *,
         json: Optional[Dict[str, Any]] = None,
-        idempotency_key: Optional[str] = None,
+        headers: Optional[Mapping[str, str]] = None,
         run_id: Optional[str] = None,
         last_event_id: int = 0,
     ) -> AsyncIterator[WorkflowEvent]:
-        headers = (
-            self._submit_headers(idempotency_key, stream=True)
-            if method == "POST"
-            else {"Accept": CONTENT_TYPE_SSE}
-        )
+        resolved_headers = dict(headers or {"Accept": CONTENT_TYPE_SSE})
         attempt = 0
         while True:
             cause: Optional[Exception] = None
@@ -953,7 +1030,7 @@ class AsyncMakra(_BaseClient):
                     method,
                     self._config.url(path),
                     json=json,
-                    headers=_with_resume(headers, last_event_id),
+                    headers=_with_resume(resolved_headers, last_event_id),
                     timeout=self._stream_timeout(),
                 ) as response:
                     if response.status_code >= 400:
@@ -975,7 +1052,7 @@ class AsyncMakra(_BaseClient):
                             return
             except httpx.HTTPError as exc:
                 cause = exc
-            method, path, json, headers = _resume_target(run_id)
+            method, path, json, resolved_headers = _resume_target(run_id)
             attempt += 1
             if run_id is None or attempt > self._config.max_retries:
                 raise MakraStreamError(

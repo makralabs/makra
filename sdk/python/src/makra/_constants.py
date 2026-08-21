@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import FrozenSet
 
-SDK_VERSION = "0.1.0"
+SDK_VERSION = "0.2.0"
 USER_AGENT = "makra-python/" + SDK_VERSION
 
 # --- Endpoints -------------------------------------------------------------
@@ -58,12 +58,33 @@ HEADER_API_KEY = "Api-Key"
 HEADER_IDEMPOTENCY_KEY = "Idempotency-Key"
 HEADER_PREFER = "Prefer"
 HEADER_LAST_EVENT_ID = "Last-Event-ID"
+HEADER_CONTENT_TYPE = "Content-Type"
+HEADER_ACCEPT = "Accept"
+HEADER_USER_AGENT = "User-Agent"
 HEADER_RETRY_AFTER = "Retry-After"
 HEADER_REQUEST_ID = "X-Request-Id"
 HEADER_RUN_ID = "X-Makra-Run-Id"
 HEADER_USAGE_STATUS = "X-Makra-Usage-Status"
 HEADER_CREDITS_CHARGED = "X-Makra-Credits-Charged"
 HEADER_TELEMETRY_RUN_ID = "X-Makra-Telemetry-Run-Id"
+
+# Names the SDK sets itself. Callers pass the matching constructor or
+# operation argument instead of overriding these through default_headers.
+RESERVED_REQUEST_HEADERS: FrozenSet[str] = frozenset(
+    {
+        HEADER_API_KEY.lower(),
+        HEADER_CONTENT_TYPE.lower(),
+        HEADER_ACCEPT.lower(),
+        HEADER_USER_AGENT.lower(),
+        HEADER_IDEMPOTENCY_KEY.lower(),
+        HEADER_PREFER.lower(),
+        HEADER_LAST_EVENT_ID.lower(),
+    }
+)
+
+# GET /workflows/runs query window documented by the public API.
+LIST_RUNS_MIN_LIMIT = 1
+LIST_RUNS_MAX_LIMIT = 100
 
 PREFER_RESPOND_ASYNC = "respond-async"
 
@@ -146,6 +167,9 @@ class Features:
     SCHEMA = "schema"
 
 
+FEATURES: FrozenSet[str] = frozenset({Features.EXTRACT, Features.SCHEMA})
+
+
 # --- Run lifecycle ---------------------------------------------------------
 
 
@@ -158,6 +182,18 @@ class RunStates:
     CANCELLED = "cancelled"
     BUDGET_EXHAUSTED = "budget_exhausted"
 
+
+RUN_STATES: FrozenSet[str] = frozenset(
+    {
+        RunStates.QUEUED,
+        RunStates.RUNNING,
+        RunStates.CANCEL_REQUESTED,
+        RunStates.COMPLETED,
+        RunStates.FAILED,
+        RunStates.CANCELLED,
+        RunStates.BUDGET_EXHAUSTED,
+    }
+)
 
 TERMINAL_RUN_STATES: FrozenSet[str] = frozenset(
     {

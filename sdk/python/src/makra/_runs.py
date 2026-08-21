@@ -7,20 +7,39 @@ thread it through every follow-up call.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterator, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterator, Mapping, Optional
 
+from ._constants import TERMINAL_RUN_STATES, RunStates
 from ._events import WorkflowEvent
-from ._types import AsyncAdmission, RunView
+from ._types import ResponseBody, RunResult, RunView
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from ._client import AsyncMakra, Makra
+
+
+def run_is_terminal(run: Mapping[str, Any]) -> bool:
+    """True when ``run["state"]`` is one of the documented terminal states."""
+    return str(run.get("state", "")) in TERMINAL_RUN_STATES
+
+
+def run_succeeded(run: Mapping[str, Any]) -> bool:
+    """True when the run completed and domain success is not explicitly false.
+
+    Absence of ``success`` on a ``completed`` run is treated as successful for
+    compatibility with existing run responses. Incomplete, failed, cancelled,
+    and budget-exhausted runs are not successful.
+    """
+    return (
+        str(run.get("state", "")) == RunStates.COMPLETED
+        and run.get("success") is not False
+    )
 
 
 class _BaseRunHandle:
     """Identity and admission metadata shared by both handle flavours."""
 
     def __init__(
-        self, admission: AsyncAdmission, *, timeout: Optional[float] = None
+        self, admission: Mapping[str, Any], *, timeout: Optional[float] = None
     ) -> None:
         self.id: str = str(admission.get("run_id", ""))
         self.feature: Optional[str] = admission.get("feature")
@@ -43,7 +62,7 @@ class RunHandle(_BaseRunHandle):
     def __init__(
         self,
         client: "Makra",
-        admission: AsyncAdmission,
+        admission: Mapping[str, Any],
         *,
         timeout: Optional[float] = None,
     ) -> None:
@@ -74,7 +93,7 @@ class RunHandle(_BaseRunHandle):
         """Attach to the run's live event stream."""
         return self._client.stream_run_events(self.id, last_event_id=last_event_id)
 
-    def result(self) -> Any:
+    def result(self) -> RunResult | ResponseBody:
         """Download the stored result payload."""
         return self._client.get_run_result(self.id)
 
@@ -91,7 +110,7 @@ class AsyncRunHandle(_BaseRunHandle):
     def __init__(
         self,
         client: "AsyncMakra",
-        admission: AsyncAdmission,
+        admission: Mapping[str, Any],
         *,
         timeout: Optional[float] = None,
     ) -> None:
@@ -115,7 +134,7 @@ class AsyncRunHandle(_BaseRunHandle):
     def stream(self, *, last_event_id: int = 0) -> AsyncIterator[WorkflowEvent]:
         return self._client.stream_run_events(self.id, last_event_id=last_event_id)
 
-    async def result(self) -> Any:
+    async def result(self) -> RunResult | ResponseBody:
         return await self._client.get_run_result(self.id)
 
     async def cancel(self) -> RunView:

@@ -4,6 +4,9 @@ These mirror the wire contract exactly: nested ``config`` keys keep their
 snake_case names in Python because they are forwarded to the API unchanged.
 The API rejects unknown ``config`` keys, so the TypedDicts double as
 documentation of what a caller is allowed to override.
+
+Response aliases describe the decoded value a method returns. They do not
+wrap, unwrap, or otherwise transform the server body.
 """
 
 from __future__ import annotations
@@ -14,6 +17,9 @@ JsonPrimitive = Union[str, int, float, bool, None]
 JsonValue = Union[JsonPrimitive, Mapping[str, Any], List[Any]]
 JsonObject = Mapping[str, Any]
 JsonSchema = Union[Mapping[str, Any], List[Any]]
+
+# Decoded success body: parsed JSON, a text fallback, or None for empty/204.
+ResponseBody = Union[Mapping[str, Any], List[Any], str, int, float, bool, None]
 
 ProxyRegionScope = Literal["worldwide", "continent", "country"]
 ProxyContinent = Literal[
@@ -87,6 +93,43 @@ class SchemaConfig(CommonConfig, total=False):
 # --- Response bodies -------------------------------------------------------
 
 
+class HealthResponse(TypedDict):
+    """Success body of ``GET /healthz`` and ``GET /healthz/ready``."""
+
+    status: str
+
+
+class WorkflowEnvelope(TypedDict, total=False):
+    """Stable fields on a blocking workflow success body.
+
+    ``data`` and other payload keys remain untyped because their shape is the
+    caller's schema, not a fixed SDK contract. Runtime values are never
+    unwrapped out of this envelope.
+    """
+
+    success: bool
+    status: str
+    message: str
+    data: Any
+    errors: List[Any]
+    warnings: List[Any]
+    usage: Dict[str, Any]
+    billing_state: str
+    telemetry_run_id: str
+
+
+class ExtractResponse(WorkflowEnvelope, total=False):
+    """Blocking ``POST /workflows/extract`` success body."""
+
+
+class SchemaResponse(WorkflowEnvelope, total=False):
+    """Blocking ``POST /workflows/schema`` success body."""
+
+
+class RunResult(WorkflowEnvelope, total=False):
+    """Stored result payload from ``GET /workflows/runs/{id}/result``."""
+
+
 class ResultSummary(TypedDict, total=False):
     """Metadata about a stored run result. Never the payload itself."""
 
@@ -154,7 +197,9 @@ __all__ = [
     "CrawlerRecoveryConfig",
     "ExecutionMode",
     "ExtractConfig",
+    "ExtractResponse",
     "Feature",
+    "HealthResponse",
     "JsonObject",
     "JsonSchema",
     "JsonValue",
@@ -163,12 +208,16 @@ __all__ = [
     "ProxyContinent",
     "ProxyRegionConfig",
     "ProxyRegionScope",
+    "ResponseBody",
     "ResultSummary",
     "RunPage",
     "RunProgress",
+    "RunResult",
     "RunState",
     "RunView",
     "SchemaConfig",
+    "SchemaResponse",
     "TitleConfig",
     "ValidationMode",
+    "WorkflowEnvelope",
 ]

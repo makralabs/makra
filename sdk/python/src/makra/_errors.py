@@ -3,7 +3,9 @@
 Callers can catch the base :class:`MakraError` for anything the SDK raises, or
 a specific subclass to branch on a condition worth handling — a missing key, an
 empty balance, a rate limit. Every HTTP failure carries the decoded body so no
-information is lost behind the exception type.
+information is lost behind the exception type. Result-retrieval contract
+failures raise :class:`MakraResultError`, a temporary subclass of
+:class:`MakraStreamError` so existing stream catches still work.
 """
 
 from __future__ import annotations
@@ -116,6 +118,26 @@ class MakraStreamError(MakraError):
         super().__init__(message)
         self.message = message
         self.run_id = run_id
+
+
+class MakraResultError(MakraStreamError):
+    """A stored-result redirect or download contract failed.
+
+    Temporarily a ``MakraStreamError`` subclass so existing ``except
+    MakraStreamError`` handlers still catch result-retrieval failures. A
+    future major version may reparent this class directly under
+    ``MakraError``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        run_id: Optional[str] = None,
+        location: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, run_id=run_id)
+        self.location = location
 
 
 class MakraRunFailedError(MakraError):

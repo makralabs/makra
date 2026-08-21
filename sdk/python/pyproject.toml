@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "makra"
-version = "0.1.0"
+version = "0.2.0"
 description = "Official Python SDK for the Makra API"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -33,8 +33,16 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
 
 [tool.pyright]
 include = ["src", "tests"]
 pythonVersion = "3.9"
 typeCheckingMode = "strict"
+reportUnnecessaryIsInstance = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
