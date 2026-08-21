@@ -1,0 +1,47 @@
+name: Python SDK
+
+on:
+  pull_request:
+  push:
+    branches: [master, develop]
+  schedule:
+    - cron: "27 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check src tests examples
+      - run: pytest -m "not integration"
+      - run: pyright
+
+  integration:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - env:
+          MAKRA_INTEGRATION: "1"
+          MAKRA_API_KEY: ${{ secrets.MAKRA_API_KEY }}
+        run: |
+          if [ -z "$MAKRA_API_KEY" ]; then
+            echo "MAKRA_API_KEY is not configured; skipping credentialed golden path."
+            exit 0
+          fi
+          pytest -m integration

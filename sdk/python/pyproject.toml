@@ -30,6 +30,9 @@ packages = ["src/makra"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "integration: credentialed public API checks skipped on pull requests",
+]
 
 [tool.ruff]
 line-length = 88
