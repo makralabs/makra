@@ -623,9 +623,11 @@ ExtractOptions(
 
 `additional_pages=None` leaves pagination unspecified. Setting
 `additional_pages` without `pagination_enabled` enables pagination, including
-`additional_pages=0` as enabled-with-zero-extra-pages. `ProxyRegion` is the
-only nested value object; crawler, recovery, pagination, and title settings
-are fields on the top-level option objects.
+`additional_pages=0` as enabled-with-zero-extra-pages. Shared crawler fields
+live on an internal `BaseOptions` base; `ExtractOptions` does not subclass
+`SchemaOptions`. `ProxyRegion` is the only nested value object; crawler,
+recovery, pagination, and title settings are fields on the top-level option
+objects.
 
 Dictionary configuration remains supported. JavaScript has no equivalent in
 0.1.0.
@@ -839,7 +841,7 @@ sdk/
       _constants.py   URLs, headers, enums, defaults
       _iso3166.py     ISO 3166-1 alpha-2 country codes
       _types.py       request and response TypedDicts
-      _options.py     ExtractOptions, SchemaOptions, ProxyRegion
+      _options.py     BaseOptions, ExtractOptions, SchemaOptions, ProxyRegion
       _config.py      settings resolution
       _errors.py      error hierarchy and HTTP mapping
       _requests.py    validation and payload building

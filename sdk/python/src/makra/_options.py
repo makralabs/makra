@@ -52,15 +52,15 @@ class ProxyRegion:
 
 
 @dataclass(frozen=True)
-class SchemaOptions:
-    """Request-overridable config shared by extract and schema workflows."""
+class BaseOptions:
+    """Crawler and recovery fields shared by extract and schema options."""
 
     post_ready_wait_ms: Optional[int] = None
     proxy_region: Optional[ProxyRegion] = None
     recovery_retry: Optional[bool] = None
     recovery_retry_delay_ms: Optional[int] = None
 
-    def to_config(self) -> SchemaConfig:
+    def _common_config(self) -> SchemaConfig:
         crawler: CrawlerConfig = {}
         if self.post_ready_wait_ms is not None:
             crawler["post_ready_wait_ms"] = self.post_ready_wait_ms
@@ -77,9 +77,17 @@ class SchemaOptions:
             return {}
         return {"crawler": crawler}
 
+    def to_config(self) -> SchemaConfig:
+        return self._common_config()
+
 
 @dataclass(frozen=True)
-class ExtractOptions(SchemaOptions):
+class SchemaOptions(BaseOptions):
+    """Request-overridable config for the schema workflow."""
+
+
+@dataclass(frozen=True)
+class ExtractOptions(BaseOptions):
     """Extract workflow config, including extract-only controls.
 
     ``additional_pages=None`` leaves pagination unspecified. Setting
@@ -95,7 +103,7 @@ class ExtractOptions(SchemaOptions):
 
     def to_config(self) -> ExtractConfig:
         config: ExtractConfig = {}
-        crawler = super().to_config().get("crawler")
+        crawler = self._common_config().get("crawler")
         if crawler is not None:
             config["crawler"] = crawler
         if self.validation_mode is not None:
@@ -115,6 +123,7 @@ class ExtractOptions(SchemaOptions):
 
 
 __all__ = [
+    "BaseOptions",
     "ExtractOptions",
     "ProxyRegion",
     "SchemaOptions",

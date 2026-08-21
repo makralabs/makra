@@ -391,6 +391,27 @@ def test_additional_pages_zero_enables_pagination():
     assert ProxyRegion.worldwide().to_dict() == {"scope": ProxyRegionScopes.WORLDWIDE}
 
 
+def test_extract_and_schema_options_share_base_options():
+    from makra._options import BaseOptions
+
+    proxy = ProxyRegion.country(Iso3166Alpha2.DE)
+    extract = ExtractOptions(
+        post_ready_wait_ms=1000,
+        proxy_region=proxy,
+        recovery_retry=True,
+    )
+    schema = SchemaOptions(
+        post_ready_wait_ms=1000,
+        proxy_region=proxy,
+        recovery_retry=True,
+    )
+    assert isinstance(extract, BaseOptions)
+    assert isinstance(schema, BaseOptions)
+    assert not isinstance(extract, SchemaOptions)
+    assert not isinstance(schema, ExtractOptions)
+    assert extract.to_config().get("crawler") == schema.to_config().get("crawler")
+
+
 def test_run_outcome_helpers_cover_documented_states():
     assert run_is_terminal({"state": RunStates.COMPLETED}) is True
     assert run_is_terminal({"state": RunStates.FAILED}) is True

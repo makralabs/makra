@@ -118,6 +118,8 @@ config = ExtractOptions(
 )
 ```
 
+Shared crawler fields live on an internal `BaseOptions` base. `SchemaOptions` and `ExtractOptions` both inherit that base; `ExtractOptions` adds extract-only fields. `ExtractOptions` does not subclass `SchemaOptions`.
+
 ### Common configuration: extraction and schema
 
 | Path | Accepted values | Behavior |

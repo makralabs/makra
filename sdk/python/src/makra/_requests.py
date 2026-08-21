@@ -24,7 +24,7 @@ from ._constants import (
     ProxyRegionScopes,
 )
 from ._iso3166 import ISO_3166_ALPHA2_CODES
-from ._options import ExtractOptions, SchemaOptions
+from ._options import BaseOptions, ExtractOptions, SchemaOptions
 from ._types import ExtractConfig, JsonSchema, SchemaConfig
 
 ExtractConfigInput = Union[ExtractConfig, ExtractOptions]
@@ -198,7 +198,7 @@ def _as_config_mapping(
 ) -> Optional[Mapping[str, Any]]:
     if config is None:
         return None
-    if isinstance(config, (ExtractOptions, SchemaOptions)):
+    if isinstance(config, BaseOptions):
         return config.to_config()
     return config
 
