@@ -1,13 +1,16 @@
 <p align="center">
-  <img src="assets/makralabs-lockup.png" alt="Makralabs" width="360" />
+  <img src="assets/makralabs-lockup.png" alt="Makralabs" width="220" />
 </p>
 
 <p align="center">
   Crawl the web, like a database query
 </p>
-
+    
 <p align="center">
-  <a href="https://x.com/makralabs"><img src="https://img.shields.io/badge/X-%40makralabs-000000?logo=x&amp;logoColor=white" alt="Follow Makralabs on X" /></a>
+  <a href="https://x.com/makralabs">
+    <img src="https://img.shields.io/badge/-%40makralabs-000000?logo=x&logoColor=white" alt="Follow Makralabs on X" />
+  </a>
+  <!-- <a href="https://x.com/makralabs"><img src="https://img.shields.io/badge/X-%40makralabs-000000?logo=x&amp;logoColor=white" alt="Follow Makralabs on X" /></a> -->
   <a href="https://pypi.org/project/makra/"><img src="https://img.shields.io/pypi/v/makra?label=PyPI&amp;logo=pypi&amp;logoColor=white&amp;color=3775A9" alt="Makra on PyPI" /></a>
   <a href="https://www.npmjs.com/package/makra"><img src="https://img.shields.io/npm/v/makra?label=npm&amp;logo=npm&amp;logoColor=white&amp;color=CB3837" alt="Makra on npm" /></a>
   <a href="https://github.com/makralabs/makra"><img src="https://img.shields.io/github/stars/makralabs/makra?label=Stars&amp;logo=github&amp;color=181717" alt="GitHub stars" /></a>
