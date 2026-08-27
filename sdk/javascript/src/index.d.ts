@@ -142,6 +142,75 @@ export interface ExtractConfig extends CommonConfig {
 export type SchemaConfig = CommonConfig;
 
 export type JsonSchema = Record<string, unknown> | unknown[];
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+/** Parsed JSON, a text fallback, or `undefined` for an empty/204 response. */
+export type ResponseBody = JsonValue | undefined;
+
+export interface HealthResponse {
+  status: string;
+  [key: string]: unknown;
+}
+
+/** Stable fields on a blocking workflow response. The result data is caller-defined. */
+export interface WorkflowEnvelope {
+  success?: boolean;
+  status?: string;
+  message?: string;
+  data?: unknown;
+  errors?: unknown[];
+  warnings?: unknown[];
+  usage?: Record<string, unknown>;
+  billing_state?: string;
+  telemetry_run_id?: string;
+  [key: string]: unknown;
+}
+
+export type ExtractResponse = WorkflowEnvelope;
+export type SchemaResponse = WorkflowEnvelope;
+export type RunResult = WorkflowEnvelope;
+
+export interface BaseOptionsInit {
+  postReadyWaitMs?: number;
+  proxyRegion?: ProxyRegion;
+  recoveryRetry?: boolean;
+  recoveryRetryDelayMs?: number;
+}
+
+/** A proxy egress region. Use the static factories to avoid wire nesting. */
+export declare class ProxyRegion {
+  readonly scope: ProxyRegionScope;
+  readonly value: string | null;
+  constructor(scope: ProxyRegionScope, value?: string | null);
+  static worldwide(): ProxyRegion;
+  static continent(value: ProxyContinent): ProxyRegion;
+  static country(value: string): ProxyRegion;
+  toConfig(): ProxyRegionConfig;
+}
+
+declare class BaseOptions {
+  protected constructor(options?: BaseOptionsInit);
+  toConfig(): SchemaConfig;
+}
+
+/** Ergonomic configuration builder for schema generation. */
+export declare class SchemaOptions extends BaseOptions {
+  constructor(options?: BaseOptionsInit);
+  toConfig(): SchemaConfig;
+}
+
+export interface ExtractOptionsInit extends BaseOptionsInit {
+  validationMode?: ValidationMode;
+  additionalPages?: number;
+  paginationEnabled?: boolean;
+  titleEnabled?: boolean;
+}
+
+/** Ergonomic configuration builder for structured extraction. */
+export declare class ExtractOptions extends BaseOptions {
+  constructor(options?: ExtractOptionsInit);
+  toConfig(): ExtractConfig;
+}
 
 // --- Responses ---------------------------------------------------------------
 
@@ -150,32 +219,51 @@ export interface ResultSummary {
   size_bytes?: number;
   content_type?: string;
   expires_at?: string;
+  sha256?: string;
+  href?: string;
   [key: string]: unknown;
 }
 
 export interface RunProgress {
   pages_total?: number;
   pages_completed?: number;
+  attempt_number?: number;
+  phase?: string;
   [key: string]: unknown;
 }
 
 export interface RunView {
-  run_id: string;
+  id?: string;
+  run_id?: string;
   feature?: Feature;
   state?: RunState;
+  sequence?: number;
   created_at?: string;
+  started_at?: string;
+  terminal_at?: string;
   updated_at?: string;
   terminal_reason?: string;
   failure_code?: string;
   progress?: RunProgress;
   result?: ResultSummary;
+  result_available?: boolean;
   poll_after_ms?: number;
+  response_mode?: string;
+  success?: boolean;
+  upstream_status?: number;
+  credits_charged?: number;
+  credits_charged_str?: string;
+  usage?: Record<string, unknown>;
+  billing_state?: string;
+  telemetry_run_id?: string;
+  archived?: boolean;
   [key: string]: unknown;
 }
 
 export interface RunPage {
   items?: RunView[];
   next_cursor?: string | null;
+  concurrency?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -270,6 +358,10 @@ export declare class MakraStreamError extends MakraError {
   readonly runId?: string;
 }
 
+export declare class MakraResultError extends MakraStreamError {
+  readonly location?: string;
+}
+
 export declare class MakraRunFailedError extends MakraError {
   readonly runId: string;
   readonly state: RunState;
@@ -315,29 +407,29 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export interface ExtractOptions extends RequestOptions {
+export interface ExtractRequestOptions extends RequestOptions {
   urls: string[];
   schema: JsonSchema;
   /** Default `"concurrent"`. */
   executionMode?: ExecutionMode;
-  config?: ExtractConfig;
+  config?: ExtractConfig | ExtractOptions;
   /** Supply your own to make a submission replayable across processes. */
   idempotencyKey?: string;
   /** Milliseconds; overrides the client timeout for this call. */
   timeout?: number;
 }
 
-export interface SchemaOptions extends RequestOptions {
+export interface SchemaRequestOptions extends RequestOptions {
   url: string;
   /** Return only an already-memoized schema instead of building one. */
   onlyMemoized?: boolean;
-  config?: SchemaConfig;
+  config?: SchemaConfig | SchemaOptions;
   idempotencyKey?: string;
   timeout?: number;
 }
 
-export type ExtractStreamOptions = Omit<ExtractOptions, "timeout">;
-export type SchemaStreamOptions = Omit<SchemaOptions, "timeout">;
+export type ExtractStreamOptions = Omit<ExtractRequestOptions, "timeout">;
+export type SchemaStreamOptions = Omit<SchemaRequestOptions, "timeout">;
 
 export interface WaitOptions extends RequestOptions {
   /** Milliseconds to keep polling before giving up. */
@@ -359,6 +451,9 @@ export interface StreamRunOptions extends RequestOptions {
   lastEventId?: number;
 }
 
+export declare function runIsTerminal(run: Record<string, unknown>): boolean;
+export declare function runSucceeded(run: Record<string, unknown>): boolean;
+
 /** A submitted run, observable without holding the original connection. */
 export declare class RunHandle {
   readonly id: string;
@@ -373,7 +468,7 @@ export declare class RunHandle {
   refresh(): Promise<RunView>;
   wait(options?: WaitOptions): Promise<RunView>;
   stream(options?: StreamRunOptions): AsyncGenerator<WorkflowEvent>;
-  result(): Promise<unknown>;
+  result(): Promise<RunResult | ResponseBody>;
   cancel(): Promise<RunView>;
 }
 
@@ -384,11 +479,11 @@ export declare class Makra {
   readonly apiKey: string;
   readonly baseUrl: string;
 
-  ping(options?: RequestOptions): Promise<unknown>;
-  ready(options?: RequestOptions): Promise<unknown>;
+  ping(options?: RequestOptions): Promise<HealthResponse | ResponseBody>;
+  ready(options?: RequestOptions): Promise<HealthResponse | ResponseBody>;
 
-  extract(options: ExtractOptions): Promise<unknown>;
-  schema(options: SchemaOptions): Promise<unknown>;
+  extract(options: ExtractRequestOptions): Promise<ExtractResponse | ResponseBody>;
+  schema(options: SchemaRequestOptions): Promise<SchemaResponse | ResponseBody>;
 
   extractStream(options: ExtractStreamOptions): AsyncGenerator<WorkflowEvent>;
   schemaStream(options: SchemaStreamOptions): AsyncGenerator<WorkflowEvent>;
@@ -401,5 +496,5 @@ export declare class Makra {
   listRuns(options?: ListRunsOptions): Promise<RunPage>;
   cancelRun(runId: string, options?: RequestOptions): Promise<RunView>;
   waitForRun(runId: string, options?: WaitOptions): Promise<RunView>;
-  getRunResult(runId: string, options?: RequestOptions): Promise<unknown>;
+  getRunResult(runId: string, options?: RequestOptions): Promise<RunResult | ResponseBody>;
 }

@@ -23,6 +23,7 @@ import {
   ENV_TIMEOUT,
   HEADER_API_KEY,
   PRODUCTION_BASE_URL,
+  RESERVED_REQUEST_HEADERS,
   USER_AGENT,
 } from "./constants.js";
 
@@ -67,7 +68,7 @@ export function resolveConfig({
       undefined,
       DEFAULT_RETRY_BACKOFF_MS,
     ),
-    defaultHeaders: { ...(defaultHeaders ?? {}) },
+    defaultHeaders: validatedDefaultHeaders(defaultHeaders),
   };
 
   /** Headers sent on every request, including health checks. */
@@ -100,6 +101,9 @@ function normalizeBaseUrl(value) {
 function coerce(name, explicit, fromEnv, fallback) {
   for (const value of [explicit, fromEnv]) {
     if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "boolean") {
+      throw new TypeError(`${name} must be a number`);
+    }
     const number = Number(value);
     if (!Number.isFinite(number)) {
       throw new TypeError(`${name} must be a number`);
@@ -107,6 +111,44 @@ function coerce(name, explicit, fromEnv, fallback) {
     return number;
   }
   return fallback;
+}
+
+function validatedDefaultHeaders(defaultHeaders) {
+  if (defaultHeaders === undefined || defaultHeaders === null) return {};
+  if (
+    typeof defaultHeaders !== "object" ||
+    Array.isArray(defaultHeaders)
+  ) {
+    throw new TypeError("defaultHeaders must be an object of strings");
+  }
+  const resolved = {};
+  for (const [key, value] of Object.entries(defaultHeaders)) {
+    if (typeof value !== "string") {
+      throw new TypeError("defaultHeaders keys and values must be strings");
+    }
+    const reserved = key.toLowerCase();
+    if (RESERVED_REQUEST_HEADERS.has(reserved)) {
+      throw new TypeError(
+        `defaultHeaders must not include reserved header '${key}'; ${reservedHeaderHint(reserved)}`,
+      );
+    }
+    resolved[key] = value;
+  }
+  return resolved;
+}
+
+const RESERVED_HEADER_HINTS = {
+  "api-key": "pass apiKey to the Makra constructor",
+  "content-type": "the SDK sets Content-Type automatically",
+  accept: "the SDK sets Accept automatically",
+  "user-agent": "the SDK sets User-Agent automatically",
+  "idempotency-key": "pass idempotencyKey to the workflow method",
+  prefer: "use submitExtract or submitSchema for deferred runs",
+  "last-event-id": "pass lastEventId to streamRunEvents",
+};
+
+function reservedHeaderHint(name) {
+  return RESERVED_HEADER_HINTS[name] ?? "this header is owned by the SDK";
 }
 
 function positive(name, explicit, fromEnv, fallback) {

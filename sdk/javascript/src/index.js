@@ -28,6 +28,8 @@
 export { Makra } from "./client.js";
 export { resolveConfig } from "./config.js";
 export { RunHandle } from "./runs.js";
+export { runIsTerminal, runSucceeded } from "./runs.js";
+export { ExtractOptions, ProxyRegion, SchemaOptions } from "./options.js";
 export { WorkflowEvent, parseEvent, terminalState } from "./events.js";
 export { SSEDecoder } from "./sse.js";
 
@@ -41,6 +43,7 @@ export {
   MakraNotFoundError,
   MakraPermissionError,
   MakraRateLimitError,
+  MakraResultError,
   MakraRunFailedError,
   MakraServerError,
   MakraStreamError,

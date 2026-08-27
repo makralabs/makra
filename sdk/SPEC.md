@@ -7,13 +7,10 @@ maintaining the official `makra` packages for Python (PyPI) and JavaScript
 (npm). The words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative.
 Where this document and an implementation disagree, this document wins.
 
-Python 0.2.0 adds interface ergonomics that JavaScript does not yet implement:
-typed response aliases, `ExtractOptions` / `SchemaOptions` / `ProxyRegion`,
-`run_is_terminal` / `run_succeeded`, reserved-header rejection, tighter
-per-operation argument validation, and `MakraResultError`. Those additions are
-marked **Python 0.2.0** below. They MUST be ported before the packages claim
-cross-language 0.2.0 parity. Until that port lands, the Python package MAY be
-`0.2.0` while JavaScript remains `0.1.0`.
+Version 0.2.0 aligns the public behavior of the Python and JavaScript packages.
+Both ship typed response declarations, workflow configuration builders,
+outcome helpers, reserved-header rejection, operation argument validation, and
+`MakraResultError`. Language naming and duration units remain idiomatic.
 
 ## 1. Goals and scope
 
@@ -46,10 +43,7 @@ configuration, telemetry processing, and API-key issuance are outside version
 | JavaScript | `makra` | `sdk/javascript` | Node.js 18, ESM |
 
 Both packages MUST use semantic versioning and SHOULD share a public SDK
-version. The Python package is `0.2.0`. JavaScript remains `0.1.0` until the
-Python-only 0.2.0 ergonomics listed in the status block are ported. Cross-language
-version alignment resumes when that parity lands. The initial joint release was
-`0.1.0`.
+version. Both packages are `0.2.0`. The initial joint release was `0.1.0`.
 
 Python MUST ship a `py.typed` marker and type hints. JavaScript MUST ship an
 ESM entry point and TypeScript declarations even though the implementation is
@@ -163,8 +157,8 @@ The package MUST export:
   `SchemaConfig`) and response aliases (`HealthResponse`, `WorkflowEnvelope`,
   `ExtractResponse`, `SchemaResponse`, `RunResult`, `RunView`, `RunPage`,
   `AsyncAdmission`, `ResponseBody`);
-- **Python 0.2.0:** `ExtractOptions`, `SchemaOptions`, `ProxyRegion`,
-  `run_is_terminal`, `run_succeeded`, and `MakraResultError`.
+- `ExtractOptions`, `SchemaOptions`, `ProxyRegion`, the run outcome helpers,
+  and `MakraResultError`.
 
 Constructor:
 
@@ -187,7 +181,7 @@ Makra(
 
 Python public operation names and arguments use `snake_case`. Successful
 operation responses are the complete decoded server body: parsed JSON, text, or
-`None`. They MUST NOT be wrapped or unwrapped. Python 0.2.0 types those bodies
+`None`. They MUST NOT be wrapped or unwrapped. Python types those bodies
 with the aliases in §7.1; the annotations describe the returned value and MUST
 NOT claim a narrower shape than the decoder can produce.
 
@@ -197,6 +191,8 @@ The package MUST export:
 
 - `Makra`;
 - `RunHandle`, `WorkflowEvent`, and `SSEDecoder`;
+- `ExtractOptions`, `SchemaOptions`, `ProxyRegion`, `runIsTerminal`, and
+  `runSucceeded`;
 - the full error hierarchy of §8.1;
 - `PRODUCTION_BASE_URL`, `DEVELOPMENT_BASE_URL`, `DUMMY_API_KEY`,
   `SDK_VERSION`, and the enum namespaces listed in §4.1;
@@ -305,11 +301,10 @@ Python signature:
 extract(urls, schema, *, execution_mode="concurrent", config=None, idempotency_key=None, timeout=None)
 ```
 
-**Python 0.2.0:** `config` MAY be an `ExtractConfig` mapping or an
+`config` MAY be an `ExtractConfig` mapping or an
 `ExtractOptions` instance. The request builder MUST convert option objects to
 the mapping shape before the shared normalization path, so dictionary and
 options inputs that express the same fields produce identical wire JSON.
-JavaScript continues to accept only the nested config object.
 
 JavaScript signature:
 
@@ -345,7 +340,7 @@ POST /workflows/schema
 
 Python: `schema(url, *, only_memoized=False, config=None, idempotency_key=None, timeout=None)`
 
-**Python 0.2.0:** `config` MAY be a `SchemaConfig` mapping or a `SchemaOptions`
+`config` MAY be a `SchemaConfig` mapping or a `SchemaOptions`
 instance, converted the same way as extract options.
 
 JavaScript: `schema({ url, onlyMemoized = false, config = {} })`
@@ -464,11 +459,10 @@ HTTP client follow this redirect automatically, because the `Api-Key` header
 would be forwarded to a third-party host. They MUST instead issue an
 unauthenticated request to the `Location` target. A redirect without a
 `Location`, or with a `Location` that is not an absolute `http` or `https`
-URL, raises `MakraResultError` (**Python 0.2.0**). `MakraResultError` is a
+URL, raises `MakraResultError`. `MakraResultError` is a
 subclass of `MakraStreamError` during this compatibility period so existing
 stream catches still work. Exception messages and the optional `location`
-attribute MUST NOT include a presigned query string. JavaScript still raises
-`MakraStreamError` for a missing `Location` until parity lands.
+attribute MUST NOT include a presigned query string.
 
 ### 5.10 Retries and idempotency
 
@@ -486,14 +480,19 @@ Every workflow submission MUST carry an `Idempotency-Key`. Without it a retried
 `POST` could start — and bill — a second run. Implementations MUST generate one
 per submission when the caller does not supply it.
 
-### 5.11 Run outcome helpers (Python 0.2.0)
+### 5.11 Run outcome helpers
 
-Python MUST export two pure helpers that interpret a run mapping without
+Both packages MUST export two pure helpers that interpret a run mapping without
 wrapping it:
 
 ```python
 run_is_terminal(run: Mapping[str, Any]) -> bool
 run_succeeded(run: Mapping[str, Any]) -> bool
+```
+
+```js
+runIsTerminal(run)
+runSucceeded(run)
 ```
 
 `run_is_terminal` is true when `state` is one of `completed`, `failed`,
@@ -504,8 +503,7 @@ successful for compatibility with existing run responses. Incomplete states
 (`queued`, `running`, `cancel_requested`), missing `state`, and every
 non-completed terminal state are not successful.
 
-`WorkflowEvent.success` is unchanged. JavaScript parity for these helpers is
-outstanding.
+`WorkflowEvent.success` is unchanged.
 
 ## 6. Workflow `config`
 
@@ -604,9 +602,9 @@ interfaces. Implementations MAY perform light client-side validation of enums
 and ranges, but MUST still fail before network I/O for empty URLs and empty
 schemas.
 
-### 6.5 Option objects (Python 0.2.0)
+### 6.5 Option objects
 
-Python MAY accept `ExtractOptions` and `SchemaOptions` in addition to the
+Both packages MAY accept `ExtractOptions` and `SchemaOptions` in addition to the
 nested dictionaries in §6.1–§6.2. These frozen objects hide wire nesting and
 MUST convert themselves into the existing mapping shape before the single
 normalization and validation path. Unset fields MUST be omitted so deployment
@@ -621,6 +619,15 @@ ExtractOptions(
 )
 ```
 
+```js
+new ExtractOptions({
+  validationMode: ValidationModes.REPAIR,
+  additionalPages: 2,
+  proxyRegion: ProxyRegion.country(Iso3166Alpha2.DE),
+  recoveryRetry: true,
+})
+```
+
 `additional_pages=None` leaves pagination unspecified. Setting
 `additional_pages` without `pagination_enabled` enables pagination, including
 `additional_pages=0` as enabled-with-zero-extra-pages. Shared crawler fields
@@ -629,8 +636,7 @@ live on an internal `BaseOptions` base; `ExtractOptions` does not subclass
 recovery, pagination, and title settings are fields on the top-level option
 objects.
 
-Dictionary configuration remains supported. JavaScript has no equivalent in
-0.1.0.
+Dictionary configuration remains supported in both packages.
 
 ## 7. Response decoding
 
@@ -647,9 +653,9 @@ Clients MUST preserve the complete successful server response.
 Version 0.2 does not unwrap a `{ success, data, ... }` envelope. Runtime
 response values remain the decoded server body.
 
-### 7.1 Python response aliases (Python 0.2.0)
+### 7.1 Response aliases
 
-These TypedDicts and aliases describe the value a method returns. They MUST
+These Python aliases and TypeScript declarations describe the value a method returns. They MUST
 NOT transform it. Only fields guaranteed by the server contract belong on the
 typed envelope; unstable feature data remains untyped inside it.
 
@@ -685,7 +691,7 @@ MakraError
 ├── MakraConnectionError               never reached the API
 │   └── MakraTimeoutError
 ├── MakraStreamError                   stream ended before a terminal event
-│   └── MakraResultError               result redirect/download contract failure (Python 0.2.0)
+│   └── MakraResultError               result redirect/download contract failure
 └── MakraRunFailedError                run terminal in a non-completed state
 ```
 
@@ -735,9 +741,8 @@ and MUST NOT be retried.
 
 Validation MUST cover the constraints the API itself enforces — non-empty URL
 lists and schemas, enum membership, integer ranges — and MUST NOT invent
-constraints of its own. **Python 0.2.0** additionally MUST reject, before
-network I/O, including on streaming methods at call time rather than first
-iteration:
+constraints of its own. Both packages additionally MUST reject, before network
+I/O, including on streaming methods at call time rather than first iteration:
 
 | Argument | Rule |
 | --- | --- |
@@ -789,9 +794,7 @@ in both languages.
 New operations MUST be specified once in this document with an explicit
 language-to-wire mapping, then implemented and released in both packages.
 
-The Python 0.2.0 additions in the status block are intentionally Python-only
-until JavaScript parity lands. They MUST NOT be documented as already
-available in JavaScript.
+The 0.2.0 additions are available in both packages and MUST remain aligned.
 
 ## 10. Acceptance cases
 

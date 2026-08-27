@@ -6,7 +6,7 @@
  * the HTTP surface should mean changing this file and nothing else.
  */
 
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.2.0";
 export const USER_AGENT = `makra-js/${SDK_VERSION}`;
 
 // --- Endpoints -------------------------------------------------------------
@@ -66,6 +66,17 @@ export const HEADER_USAGE_STATUS = "X-Makra-Usage-Status";
 export const HEADER_CREDITS_CHARGED = "X-Makra-Credits-Charged";
 export const HEADER_TELEMETRY_RUN_ID = "X-Makra-Telemetry-Run-Id";
 
+/** Headers that the SDK owns for authentication and workflow semantics. */
+export const RESERVED_REQUEST_HEADERS = new Set([
+  "api-key",
+  "content-type",
+  "accept",
+  "user-agent",
+  "idempotency-key",
+  "prefer",
+  "last-event-id",
+]);
+
 export const PREFER_RESPOND_ASYNC = "respond-async";
 
 export const CONTENT_TYPE_JSON = "application/json";
@@ -108,6 +119,7 @@ export const EXECUTION_MODES = new Set(Object.values(ExecutionModes));
 export const VALIDATION_MODES = new Set(Object.values(ValidationModes));
 export const PROXY_REGION_SCOPES = new Set(Object.values(ProxyRegionScopes));
 export const PROXY_CONTINENTS = new Set(Object.values(ProxyContinents));
+export const FEATURES = new Set(Object.values(Features));
 
 // --- Run lifecycle ---------------------------------------------------------
 
@@ -120,6 +132,10 @@ export const RunStates = Object.freeze({
   CANCELLED: "cancelled",
   BUDGET_EXHAUSTED: "budget_exhausted",
 });
+
+export const RUN_STATES = new Set(Object.values(RunStates));
+export const LIST_RUNS_MIN_LIMIT = 1;
+export const LIST_RUNS_MAX_LIMIT = 100;
 
 export const TERMINAL_RUN_STATES = new Set([
   RunStates.COMPLETED,

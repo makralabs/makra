@@ -98,6 +98,14 @@ export class MakraStreamError extends MakraError {
   }
 }
 
+/** A stored-result redirect or download contract failed. */
+export class MakraResultError extends MakraStreamError {
+  constructor(message, { runId, location, cause } = {}) {
+    super(message, { runId, cause });
+    this.location = location ?? undefined;
+  }
+}
+
 /** A run reached a terminal state other than `completed`. */
 export class MakraRunFailedError extends MakraError {
   constructor(message, { runId, state, run }) {

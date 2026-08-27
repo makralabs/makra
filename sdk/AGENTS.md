@@ -9,7 +9,7 @@ documentation release.
 | Path | Role |
 | --- | --- |
 | `sdk/python` | Published `makra` package (0.2.0), Python 3.9+ |
-| `sdk/javascript` | Published `makra` package (0.1.0), Node 18+ ESM |
+| `sdk/javascript` | `makra` package target (0.2.0), Node 18+ ESM |
 | `sdk/SPEC.md` | Language-neutral SDK contract |
 | `playground/` | Local scripts against `http://localhost:8080` |
 

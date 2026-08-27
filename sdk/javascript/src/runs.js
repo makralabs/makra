@@ -5,6 +5,18 @@
  * `submitSchema`. It remembers the run id so the caller does not have to
  * thread it through every follow-up call.
  */
+import { RunStates, TERMINAL_RUN_STATES } from "./constants.js";
+
+/** True when a run reached one of the documented terminal states. */
+export function runIsTerminal(run) {
+  return TERMINAL_RUN_STATES.has(run?.state);
+}
+
+/** True when a run completed and did not explicitly report domain failure. */
+export function runSucceeded(run) {
+  return run?.state === RunStates.COMPLETED && run.success !== false;
+}
+
 export class RunHandle {
   constructor(client, admission, { timeout } = {}) {
     this.id = admission.run_id ?? "";

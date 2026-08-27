@@ -10,12 +10,17 @@
 import {
   EXECUTION_MODES,
   ExecutionModes,
+  FEATURES,
+  LIST_RUNS_MAX_LIMIT,
+  LIST_RUNS_MIN_LIMIT,
   PROXY_CONTINENTS,
   PROXY_REGION_SCOPES,
   ProxyRegionScopes,
+  RUN_STATES,
   VALIDATION_MODES,
 } from "./constants.js";
 import { ISO_3166_ALPHA2 } from "./iso3166.js";
+import { isConfigOptions } from "./options.js";
 
 /** Build the `POST /workflows/extract` body. */
 export function buildExtractPayload({ urls, schema, executionMode, config, stream }) {
@@ -23,7 +28,7 @@ export function buildExtractPayload({ urls, schema, executionMode, config, strea
     urls: validatedUrls(urls),
     schema: validatedSchema(schema),
     execution_mode: validatedChoice("executionMode", executionMode, EXECUTION_MODES),
-    config: validatedExtractConfig(config),
+    config: validatedExtractConfig(asConfig(config)),
   };
   if (stream) payload.stream = true;
   return payload;
@@ -40,7 +45,7 @@ export function buildSchemaPayload({ url, onlyMemoized, config, stream }) {
   const payload = {
     url,
     only_memoized: onlyMemoized,
-    config: validatedCommonConfig(config, "config"),
+    config: validatedCommonConfig(asConfig(config), "config"),
   };
   if (stream) payload.stream = true;
   return payload;
@@ -65,7 +70,9 @@ export function resolveWorkflowTimeout(
   base,
   { config, urlCount = 1, executionMode = ExecutionModes.CONCURRENT } = {},
 ) {
-  if (explicit !== undefined && explicit !== null) return explicit;
+  if (explicit !== undefined && explicit !== null) {
+    return requirePositiveNumber("timeout", explicit);
+  }
   let pages = 1;
   const pagination = config?.pagination;
   if (pagination && pagination.enabled) {
@@ -75,6 +82,47 @@ export function resolveWorkflowTimeout(
   const urls =
     executionMode === ExecutionModes.SEQUENTIAL && urlCount > 0 ? urlCount : 1;
   return base * pages * urls;
+}
+
+export function validateIdempotencyKey(value) {
+  if (value === undefined || value === null) return undefined;
+  return requireNonEmptyString("idempotencyKey", value);
+}
+
+export function validateRunId(value) {
+  return requireNonEmptyString("runId", value);
+}
+
+export function validateOptionalTimeout(value) {
+  if (value === undefined || value === null) return undefined;
+  return requirePositiveNumber("timeout", value);
+}
+
+export function validateOptionalPollInterval(value) {
+  if (value === undefined || value === null) return undefined;
+  return requirePositiveNumber("pollInterval", value);
+}
+
+export function validateLastEventId(value) {
+  return requireNonNegativeInteger("lastEventId", value);
+}
+
+export function validateListRunsArgs({ limit, cursor, feature, state } = {}) {
+  if (limit !== undefined && limit !== null) {
+    if (!Number.isInteger(limit)) throw new TypeError("limit must be an integer");
+    if (limit < LIST_RUNS_MIN_LIMIT || limit > LIST_RUNS_MAX_LIMIT) {
+      throw new RangeError(`limit must be between ${LIST_RUNS_MIN_LIMIT} and ${LIST_RUNS_MAX_LIMIT}`);
+    }
+  }
+  if (cursor !== undefined && cursor !== null && typeof cursor !== "string") {
+    throw new TypeError("cursor must be a string");
+  }
+  if (feature !== undefined && feature !== null) {
+    validatedChoice("feature", feature, FEATURES);
+  }
+  if (state !== undefined && state !== null) {
+    validatedChoice("state", state, RUN_STATES);
+  }
 }
 
 function validatedUrls(urls) {
@@ -116,13 +164,19 @@ function validatedCommonConfig(config, path) {
   if (config === undefined || config === null) return {};
   requireObject(config, path);
   const resolved = { ...config };
-  if (Object.prototype.hasOwnProperty.call(resolved, "memory")) {
-    throw new TypeError("config.memory is not supported");
+  for (const key of ["memory", "selector_chain_version"]) {
+    if (Object.prototype.hasOwnProperty.call(resolved, key)) {
+      throw new TypeError(`config.${key} is not supported`);
+    }
   }
   if (resolved.crawler !== undefined && resolved.crawler !== null) {
     resolved.crawler = normalizedCrawler(resolved.crawler);
   }
   return resolved;
+}
+
+function asConfig(config) {
+  return isConfigOptions(config) ? config.toConfig() : config;
 }
 
 function normalizedCrawler(crawler) {
@@ -271,4 +325,25 @@ function requireObject(value, path) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError(`${path} must be an object`);
   }
+}
+
+function requirePositiveNumber(name, value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${name} must be a number`);
+  }
+  if (value <= 0) throw new RangeError(`${name} must be greater than 0`);
+  return value;
+}
+
+function requireNonNegativeInteger(name, value) {
+  if (!Number.isInteger(value)) throw new TypeError(`${name} must be an integer`);
+  if (value < 0) throw new RangeError(`${name} must not be negative`);
+  return value;
+}
+
+function requireNonEmptyString(name, value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError(`${name} must be a non-empty string`);
+  }
+  return value;
 }

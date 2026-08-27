@@ -30,6 +30,7 @@ import {
 import { resolveConfig } from "./config.js";
 import {
   MakraConnectionError,
+  MakraResultError,
   MakraRunFailedError,
   MakraStreamError,
   MakraTimeoutError,
@@ -40,6 +41,12 @@ import {
   buildSchemaPayload,
   newIdempotencyKey,
   resolveWorkflowTimeout,
+  validateIdempotencyKey,
+  validateLastEventId,
+  validateListRunsArgs,
+  validateOptionalPollInterval,
+  validateOptionalTimeout,
+  validateRunId,
 } from "./requests.js";
 import { apiError, deadline, decodeBody, isTimeout } from "./response.js";
 import { isRetryableStatus, retryDelay, sleep } from "./retry.js";
@@ -97,6 +104,7 @@ export class Makra {
     signal,
   }) {
     const body = buildExtractPayload({ urls, schema, executionMode, config });
+    validateIdempotencyKey(idempotencyKey);
     return this.#request("POST", PATH_EXTRACT, {
       body,
       headers: submitHeaders(idempotencyKey),
@@ -109,6 +117,7 @@ export class Makra {
   /** Build a JSON Schema describing everything one page contains. */
   async schema({ url, onlyMemoized = false, config, idempotencyKey, timeout, signal }) {
     const body = buildSchemaPayload({ url, onlyMemoized, config });
+    validateIdempotencyKey(idempotencyKey);
     return this.#request("POST", PATH_SCHEMA, {
       body,
       headers: submitHeaders(idempotencyKey),
@@ -144,17 +153,21 @@ export class Makra {
       config,
       stream: true,
     });
+    validateIdempotencyKey(idempotencyKey);
     return this.#streamEvents("POST", PATH_EXTRACT, { body, idempotencyKey, signal });
   }
 
   /** Run schema generation and iterate its progress events. */
   schemaStream({ url, onlyMemoized = false, config, idempotencyKey, signal }) {
     const body = buildSchemaPayload({ url, onlyMemoized, config, stream: true });
+    validateIdempotencyKey(idempotencyKey);
     return this.#streamEvents("POST", PATH_SCHEMA, { body, idempotencyKey, signal });
   }
 
   /** Attach to an existing run's event stream, optionally resuming. */
   streamRunEvents(runId, { lastEventId = 0, signal } = {}) {
+    validateRunId(runId);
+    validateLastEventId(lastEventId);
     return this.#streamEvents("GET", runPath(runId, "/events"), {
       runId,
       lastEventId,
@@ -174,6 +187,7 @@ export class Makra {
     signal,
   }) {
     const body = buildExtractPayload({ urls, schema, executionMode, config });
+    validateIdempotencyKey(idempotencyKey);
     return new RunHandle(this, await this.#submit(PATH_EXTRACT, body, idempotencyKey, signal), {
       timeout: this.#workflowTimeout(undefined, body),
     });
@@ -182,6 +196,7 @@ export class Makra {
   /** Queue a schema build and return immediately with a run handle. */
   async submitSchema({ url, onlyMemoized = false, config, idempotencyKey, signal }) {
     const body = buildSchemaPayload({ url, onlyMemoized, config });
+    validateIdempotencyKey(idempotencyKey);
     return new RunHandle(this, await this.#submit(PATH_SCHEMA, body, idempotencyKey, signal), {
       timeout: this.#workflowTimeout(undefined, body),
     });
@@ -191,11 +206,13 @@ export class Makra {
 
   /** Fetch run metadata. Never the result payload. */
   async getRun(runId, { signal } = {}) {
+    validateRunId(runId);
     return this.#request("GET", runPath(runId), { retryable: true, signal });
   }
 
   /** List the caller's non-archived runs, newest first. */
   async listRuns({ limit, cursor, feature, state, signal } = {}) {
+    validateListRunsArgs({ limit, cursor, feature, state });
     return this.#request("GET", PATH_RUNS, {
       params: { limit, cursor, feature, state },
       retryable: true,
@@ -205,6 +222,7 @@ export class Makra {
 
   /** Request cancellation of a run. Safe to call more than once. */
   async cancelRun(runId, { signal } = {}) {
+    validateRunId(runId);
     return this.#request("POST", runPath(runId, "/cancel"), {
       retryable: true,
       signal,
@@ -221,6 +239,9 @@ export class Makra {
     runId,
     { timeout, pollInterval, throwOnFailure = true, signal } = {},
   ) {
+    validateRunId(runId);
+    validateOptionalTimeout(timeout);
+    validateOptionalPollInterval(pollInterval);
     const expiresAt = Date.now() + (timeout ?? this.config.timeout);
     for (;;) {
       const run = await this.getRun(runId, { signal });
@@ -248,10 +269,11 @@ export class Makra {
 
   /** Download a terminal run's stored result payload. */
   async getRunResult(runId, { signal } = {}) {
+    validateRunId(runId);
     const path = runPath(runId, "/result");
     const response = await this.#send("GET", path, { retryable: true, signal });
     if (REDIRECT_STATUS.has(response.status)) {
-      return this.#downloadRedirect(response, path, signal);
+      return this.#downloadRedirect(response, path, signal, runId);
     }
     return decodeBody(response);
   }
@@ -345,9 +367,17 @@ export class Makra {
    * presigned URL. That URL authenticates itself, so the download must not
    * carry the Makra API key.
    */
-  async #downloadRedirect(response, path, signal) {
+  async #downloadRedirect(response, path, signal, runId) {
     const location = response.headers.get("location");
-    if (!location) throw new MakraStreamError("Result redirect did not include a location");
+    if (!location) {
+      throw new MakraResultError("Result redirect did not include a location", { runId });
+    }
+    if (!isSupportedResultLocation(location)) {
+      throw new MakraResultError(
+        "Result redirect location is not an absolute HTTP or HTTPS URL",
+        { runId, location: sanitizeResultLocation(location) },
+      );
+    }
     const clock = deadline(this.config.timeout, signal);
     let download;
     try {
@@ -441,7 +471,7 @@ export class Makra {
 }
 
 function submitHeaders(idempotencyKey) {
-  return { [HEADER_IDEMPOTENCY_KEY]: idempotencyKey || newIdempotencyKey() };
+  return { [HEADER_IDEMPOTENCY_KEY]: idempotencyKey ?? newIdempotencyKey() };
 }
 
 function withResume(headers, lastEventId) {
@@ -467,4 +497,22 @@ function queryString(params) {
   }
   const encoded = query.toString();
   return encoded ? `?${encoded}` : "";
+}
+
+function isSupportedResultLocation(value) {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && Boolean(url.host);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeResultLocation(value) {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  } catch {
+    return undefined;
+  }
 }

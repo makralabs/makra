@@ -59,6 +59,25 @@ const data = await makra.extract({
 });
 ```
 
+You can use a configuration builder when you do not want to write the nested
+wire shape yourself. Builder field names are camelCase; dictionary `config`
+keys remain snake_case because they are sent to the API unchanged.
+
+```js
+import { ExtractOptions, Iso3166Alpha2, ProxyRegion, ValidationModes } from "makra";
+
+const data = await makra.extract({
+  urls: ["https://example.com/products"],
+  schema: { products: [{ name: "string" }] },
+  config: new ExtractOptions({
+    validationMode: ValidationModes.REPAIR,
+    additionalPages: 2,
+    proxyRegion: ProxyRegion.country(Iso3166Alpha2.DE),
+    recoveryRetry: true,
+  }),
+});
+```
+
 Discover what a page contains before you write a schema:
 
 ```js
@@ -130,6 +149,18 @@ for await (const event of makra.streamRunEvents(runId, { lastEventId: 42 })) {
 }
 ```
 
+Use `runIsTerminal` and `runSucceeded` with a run response when you need to
+distinguish terminal completion from domain success. A completed run without a
+`success` field counts as successful; `success: false` does not.
+
+```js
+import { runIsTerminal, runSucceeded } from "makra";
+
+if (runIsTerminal(snapshot) && runSucceeded(snapshot)) {
+  const data = await makra.getRunResult(snapshot.id);
+}
+```
+
 ## Configuration
 
 Settings resolve as **explicit option → environment variable → default**.
@@ -184,8 +215,12 @@ MakraError
 ├── MakraConnectionError              the request never reached the API
 │   └── MakraTimeoutError
 ├── MakraStreamError                  .runId
+│   └── MakraResultError               .runId .location
 └── MakraRunFailedError               .runId .state .run
 ```
+
+`MakraResultError` covers malformed stored-result redirects. Its `location`
+property never includes a presigned query string.
 
 Malformed arguments throw `TypeError` or `RangeError` before any network call,
 so a typo in a config key costs nothing.
