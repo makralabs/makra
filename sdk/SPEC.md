@@ -1,13 +1,13 @@
 # Makra SDK Specification
 
-Status: **Normative draft for SDK version 0.2.0**
+Status: **Normative draft for SDK release v0.0.3**
 
 This document is the language-neutral source of truth for generating and
 maintaining the official `makra` packages for Python (PyPI) and JavaScript
 (npm). The words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative.
 Where this document and an implementation disagree, this document wins.
 
-Version 0.2.0 aligns the public behavior of the Python and JavaScript packages.
+Release v0.0.3 aligns the public behavior of the Python and JavaScript packages.
 Both ship typed response declarations, workflow configuration builders,
 outcome helpers, reserved-header rejection, operation argument validation, and
 `MakraResultError`. Language naming and duration units remain idiomatic.
@@ -43,7 +43,7 @@ configuration, telemetry processing, and API-key issuance are outside version
 | JavaScript | `makra` | `sdk/javascript` | Node.js 18, ESM |
 
 Both packages MUST use semantic versioning and SHOULD share a public SDK
-version. Both packages are `0.2.0`. The initial joint release was `0.1.0`.
+version. Both packages release as `v0.0.3`. The initial joint release was `v0.1.0`.
 
 Python MUST ship a `py.typed` marker and type hints. JavaScript MUST ship an
 ESM entry point and TypeScript declarations even though the implementation is
@@ -132,11 +132,10 @@ storage (§5.9).
 
 The following request header names are SDK-owned and MUST be treated
 case-insensitively as reserved: `Api-Key`, `Content-Type`, `Accept`,
-`User-Agent`, `Idempotency-Key`, `Prefer`, `Last-Event-ID`. **Python 0.2.0:**
-collisions in `default_headers` MUST raise `ValueError` naming the header and
-the supported constructor or operation argument. Arbitrary tracing and
-application headers remain allowed. JavaScript parity for this rejection is
-outstanding.
+`User-Agent`, `Idempotency-Key`, `Prefer`, `Last-Event-ID`. Both SDKs MUST
+reject collisions in default headers, naming the header and the supported
+constructor or operation argument. Arbitrary tracing and application headers
+remain allowed.
 
 ## 4. Public clients
 
@@ -794,7 +793,7 @@ in both languages.
 New operations MUST be specified once in this document with an explicit
 language-to-wire mapping, then implemented and released in both packages.
 
-The 0.2.0 additions are available in both packages and MUST remain aligned.
+The v0.0.3 additions are available in both packages and MUST remain aligned.
 
 ## 10. Acceptance cases
 
