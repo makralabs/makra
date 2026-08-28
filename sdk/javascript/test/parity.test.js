@@ -99,14 +99,16 @@ test("configuration builders produce the same payload as dictionaries", async ()
 
   await client.extract({ urls: ["https://example.com"], schema: { title: "Title" }, config: mapping });
   await client.extract({ urls: ["https://example.com"], schema: { title: "Title" }, config: options });
-  assert.deepEqual(requests[0].body.config, requests[1].body.config);
+  const submissions = requests.filter((entry) => entry.method === "POST");
+  assert.deepEqual(submissions[0].body.config, submissions[1].body.config);
   assert.deepEqual(new ExtractOptions({ additionalPages: 0 }).toConfig().pagination, {
     enabled: true,
     additional_pages: 0,
   });
 
   await client.schema({ url: "https://example.com", config: new SchemaOptions({ postReadyWaitMs: 0 }) });
-  assert.equal(requests[2].body.config.crawler.post_ready_wait_ms, 0);
+  const allSubmissions = requests.filter((entry) => entry.method === "POST");
+  assert.equal(allSubmissions[2].body.config.crawler.post_ready_wait_ms, 0);
 });
 
 test("rejects every removed configuration key", async () => {
@@ -133,8 +135,24 @@ test("run outcome helpers match Python semantics", () => {
 test("retries a workflow with the same idempotency key", async () => {
   let attempts = 0;
   handler = (request, response) => {
-    attempts += 1;
-    if (attempts < 3) return sendJson(response, 503, { error: { code: "unavailable" } });
+    if (request.url === "/workflows/extract") {
+      attempts += 1;
+      if (attempts < 3) {
+        return sendJson(response, 503, { error: { code: "unavailable" } });
+      }
+      return sendJson(response, 202, {
+        run_id: "run-1",
+        feature: "extract",
+        state: "queued",
+      });
+    }
+    if (request.url === "/workflows/runs/run-1") {
+      return sendJson(response, 200, {
+        id: "run-1",
+        state: "completed",
+        success: true,
+      });
+    }
     return sendJson(response, 200, { success: true });
   };
   const client = new Makra({ apiKey: "test-key", baseUrl, retryBackoff: 1 });
@@ -142,8 +160,39 @@ test("retries a workflow with the same idempotency key", async () => {
     await client.extract({ urls: ["https://example.com"], schema: { title: "Title" } }),
     { success: true },
   );
-  assert.equal(requests.length, 3);
-  assert.equal(new Set(requests.map((entry) => entry.headers["idempotency-key"])).size, 1);
+  const submissions = requests.filter((entry) => entry.path === "/workflows/extract");
+  assert.equal(submissions.length, 3);
+  assert.equal(new Set(submissions.map((entry) => entry.headers["idempotency-key"])).size, 1);
+});
+
+test("one-call workflow timeouts preserve the recoverable run id", async () => {
+  handler = (request, response) => {
+    if (request.url === "/workflows/extract") {
+      return sendJson(response, 202, {
+        run_id: "run-timeout",
+        feature: "extract",
+        state: "queued",
+      });
+    }
+    return sendJson(response, 200, {
+      id: "run-timeout",
+      state: "running",
+      poll_after_ms: 1,
+    });
+  };
+  const { MakraTimeoutError } = await import("../src/index.js");
+  const client = new Makra({ apiKey: "test-key", baseUrl });
+  await assert.rejects(
+    client.extract({
+      urls: ["https://example.com"],
+      schema: { title: "Title" },
+      timeout: 1,
+    }),
+    (error) =>
+      error instanceof MakraTimeoutError &&
+      error.runId === "run-timeout" &&
+      String(error).includes('getRun("run-timeout")'),
+  );
 });
 
 test("does not retry an idempotency-key reuse conflict", async () => {
@@ -291,8 +340,26 @@ test("propagates a caller abort without converting it to a timeout", async () =>
 });
 
 function defaultHandler(request, response) {
-  if (request.url === "/workflows/extract") return sendJson(response, 200, { success: true });
-  if (request.url === "/workflows/schema") return sendJson(response, 200, { success: true });
+  if (
+    (request.url === "/workflows/extract" || request.url === "/workflows/schema") &&
+    request.headers.prefer === "respond-async"
+  ) {
+    return sendJson(response, 202, {
+      run_id: "run-default",
+      feature: request.url.endsWith("schema") ? "schema" : "extract",
+      state: "queued",
+    });
+  }
+  if (request.url === "/workflows/runs/run-default") {
+    return sendJson(response, 200, {
+      id: "run-default",
+      state: "completed",
+      success: true,
+    });
+  }
+  if (request.url === "/workflows/runs/run-default/result") {
+    return sendJson(response, 200, { success: true });
+  }
   sendJson(response, 200, { status: "ok" });
 }
 

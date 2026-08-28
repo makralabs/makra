@@ -110,6 +110,17 @@ class MakraConnectionError(MakraError):
 class MakraTimeoutError(MakraConnectionError):
     """The request or an event stream exceeded its configured timeout."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        method: str = "",
+        path: str = "",
+        run_id: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, method=method, path=path)
+        self.run_id = run_id
+
 
 class MakraStreamError(MakraError):
     """An event stream ended before a terminal event and could not resume."""

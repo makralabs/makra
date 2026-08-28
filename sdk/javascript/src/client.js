@@ -3,7 +3,7 @@
  *
  * Three ways to run a workflow, sharing one transport:
  *
- * - `extract` / `schema` — blocking REST. One call in, one result out.
+ * - `extract` / `schema` — submit durably, wait, and return one result.
  * - `extractStream` / `schemaStream` — live progress events over SSE.
  * - `submitExtract` / `submitSchema` — fire and forget, returning a handle
  *   that can be polled, streamed, or cancelled later.
@@ -84,15 +84,14 @@ export class Makra {
     return this.#request("GET", PATH_READY, { retryable: true, signal });
   }
 
-  // --- Blocking workflows --------------------------------------------------
+  // --- Convenient workflows ------------------------------------------------
 
   /**
    * Extract structured data and wait for the result.
    *
-   * The connection is held until the run is terminal, so `timeout` is
-   * effectively the longest a workflow may take. When omitted, the client
-   * default is a per-page budget: paginated extracts and sequential
-   * multi-URL extracts get a proportionally longer deadline.
+   * The SDK submits the run asynchronously and polls it, so no HTTP connection
+   * must remain open for the duration of the workflow. `timeout` is the total
+   * wait deadline. A client timeout never cancels the server-side run.
    */
   async extract({
     urls,
@@ -105,26 +104,26 @@ export class Makra {
   }) {
     const body = buildExtractPayload({ urls, schema, executionMode, config });
     validateIdempotencyKey(idempotencyKey);
-    return this.#request("POST", PATH_EXTRACT, {
+    return this.#runWorkflow(
+      PATH_EXTRACT,
       body,
-      headers: submitHeaders(idempotencyKey),
-      retryable: true,
-      timeout: this.#workflowTimeout(timeout, body),
+      idempotencyKey,
+      this.#workflowTimeout(timeout, body),
       signal,
-    });
+    );
   }
 
-  /** Build a JSON Schema describing everything one page contains. */
+  /** Build a JSON Schema and wait for the durable run's result. */
   async schema({ url, onlyMemoized = false, config, idempotencyKey, timeout, signal }) {
     const body = buildSchemaPayload({ url, onlyMemoized, config });
     validateIdempotencyKey(idempotencyKey);
-    return this.#request("POST", PATH_SCHEMA, {
+    return this.#runWorkflow(
+      PATH_SCHEMA,
       body,
-      headers: submitHeaders(idempotencyKey),
-      retryable: true,
-      timeout: this.#workflowTimeout(timeout, body),
+      idempotencyKey,
+      this.#workflowTimeout(timeout, body),
       signal,
-    });
+    );
   }
 
   // --- Streaming workflows -------------------------------------------------
@@ -258,10 +257,15 @@ export class Makra {
       }
       const delay = nextPollDelay(run, pollInterval);
       if (Date.now() + delay > expiresAt) {
-        throw new MakraTimeoutError(`Workflow run ${runId} did not finish in time`, {
-          method: "GET",
-          path: runPath(runId),
-        });
+        throw new MakraTimeoutError(
+          `Workflow run ${runId} is still processing after the configured ` +
+            `timeout; retrieve it later with getRun("${runId}")`,
+          {
+            method: "GET",
+            path: runPath(runId),
+            runId,
+          },
+        );
       }
       await sleep(delay);
     }
@@ -288,6 +292,16 @@ export class Makra {
       signal,
     });
     return admission ?? {};
+  }
+
+  async #runWorkflow(path, body, idempotencyKey, timeout, signal) {
+    const admission = await this.#submit(path, body, idempotencyKey, signal);
+    const runId = String(admission?.run_id ?? "").trim();
+    if (!runId) {
+      throw new MakraResultError("Workflow admission did not include a run ID");
+    }
+    await this.waitForRun(runId, { timeout, signal });
+    return this.getRunResult(runId, { signal });
   }
 
   async #request(method, path, options) {

@@ -6,7 +6,7 @@
  * the HTTP surface should mean changing this file and nothing else.
  */
 
-export const SDK_VERSION = "0.0.3";
+export const SDK_VERSION = "0.0.4";
 export const USER_AGENT = `makra-js/${SDK_VERSION}`;
 
 // --- Endpoints -------------------------------------------------------------

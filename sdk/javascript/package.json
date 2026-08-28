@@ -1,6 +1,6 @@
 {
   "name": "makra",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Official JavaScript SDK for the Makra API",
   "type": "module",
   "main": "./src/index.js",

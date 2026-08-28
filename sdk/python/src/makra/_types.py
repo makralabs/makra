@@ -100,7 +100,7 @@ class HealthResponse(TypedDict):
 
 
 class WorkflowEnvelope(TypedDict, total=False):
-    """Stable fields on a blocking workflow success body.
+    """Stable fields on a completed workflow response body.
 
     ``data`` and other payload keys remain untyped because their shape is the
     caller's schema, not a fixed SDK contract. Runtime values are never
@@ -119,11 +119,11 @@ class WorkflowEnvelope(TypedDict, total=False):
 
 
 class ExtractResponse(WorkflowEnvelope, total=False):
-    """Blocking ``POST /workflows/extract`` success body."""
+    """Completed extract workflow response body."""
 
 
 class SchemaResponse(WorkflowEnvelope, total=False):
-    """Blocking ``POST /workflows/schema`` success body."""
+    """Completed schema workflow response body."""
 
 
 class RunResult(WorkflowEnvelope, total=False):

@@ -20,4 +20,4 @@ source consistent with the existing modules in `src/`.
 
 Method names are camelCase (`extractStream`, `submitExtract`). Wire paths stay
 `/workflows/extract` and `/workflows/schema`. Do not add JavaScript snippets to
-the current v0.0.3 docs.
+the current SDK docs.

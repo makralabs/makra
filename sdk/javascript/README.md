@@ -28,16 +28,17 @@ Pick by how long the work takes and how much you want to watch it happen.
 
 | Mode | Use when | Method |
 | --- | --- | --- |
-| REST | The run is short and you just want the answer | `extract` / `schema` |
+| Convenient | You want one call to return the final answer | `extract` / `schema` |
 | Streaming | You want live progress, e.g. to drive a UI | `extractStream` / `schemaStream` |
 | Deferred | The run is long, or the caller cannot stay online | `submitExtract` / `submitSchema` |
 
-### 1. REST
+### 1. Convenient
 
-The connection is held until the run finishes, so `timeout` is really "how
-long may this workflow take". It defaults to 300000 ms **per origin page**.
-Paginated extracts (`pagination.additional_pages`) and sequential multi-URL
-extracts scale that budget automatically unless you pass `timeout` yourself.
+`extract` and `schema` durably submit the workflow, poll it, and fetch its
+stored result. You still make one SDK call, but no HTTP connection has to stay
+open while the extraction runs. `timeout` is the total time the SDK waits; if
+it expires, the server-side run continues and the raised `MakraTimeoutError`
+includes its `runId`.
 
 ```js
 import { Iso3166Alpha2, Makra, ProxyContinents, ProxyRegionScopes, ValidationModes } from "makra";

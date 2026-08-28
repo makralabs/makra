@@ -8,8 +8,8 @@ documentation release.
 
 | Path | Role |
 | --- | --- |
-| `sdk/python` | Published `makra` package (v0.0.3), Python 3.9+ |
-| `sdk/javascript` | `makra` package target (v0.0.3), Node 18+ ESM |
+| `sdk/python` | Published `makra` package (v0.0.4), Python 3.9+ |
+| `sdk/javascript` | `makra` package target (v0.0.4), Node 18+ ESM |
 | `sdk/SPEC.md` | Language-neutral SDK contract |
 | `playground/` | Local scripts against `http://localhost:8080` |
 
@@ -20,7 +20,7 @@ wire identifiers such as `/workflows/extract`, `Feature`, or `submit_extract()`.
 
 Python only until the JavaScript documentation returns. The copy-pasteable
 quickstart is `sdk/python/examples/golden_quickstart.py`. It must stay identical
-to the first Python fence in the v0.0.3 first-extraction page.
+to the first Python fence in the v0.0.4 first-extraction page.
 
 ## Definition of done
 

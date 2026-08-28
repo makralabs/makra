@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Extract GitHub repository details with the Makra Python SDK.
+"""Extract Hacker News story details with the Makra Python SDK.
 
 Run with:
-    uv run --project sdk/python python playground/scripts/github_repositories.py
+    uv run --project sdk/python python playground/scripts/hacker_news.py
 """
 
 from __future__ import annotations
@@ -22,25 +22,21 @@ except ModuleNotFoundError as error:
         raise SystemExit(
             "The local Makra SDK is not installed for this Python interpreter.\n"
             "Run: uv run --project sdk/python python "
-            "playground/scripts/github_repositories.py\n"
+            "playground/scripts/hacker_news.py\n"
             "Or install this checkout into the active environment: "
             "python -m pip install -e sdk/python"
         ) from None
     raise
 
-DEFAULT_URL = "https://github.com/geohot?tab=repositories"
+DEFAULT_URL = "https://news.ycombinator.com"
 DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
-REPOSITORY_SCHEMA = {
-    "repositories": [
+NEWS_SCHEMA = {
+    "news_posts": [
         {
-            "title": "The name of the repository.",
-            "repository_url:$link": "The URL of the repository.",
-            "description": "The repository description.",
-            "language": "The primary programming language used in the repository.",
-            "forks": "The number of repository forks.",
-            "stars": "The number of repository stars.",
-            "license": "The license for the open-source repository.",
-            "last_updated": "The date the repository was last updated.",
+            "title": "The title of the news story.",
+            "link": "The link to the story source.",
+            "comments_count": "The number of comments on the story.",
+            "upvotes_count": "The number of upvotes on the story.",
         }
     ]
 }
@@ -107,25 +103,21 @@ def print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
     print(border("└", "┴", "┘"))
 
 
-def repositories_from(data: Any, url: str) -> list[Mapping[str, Any]]:
+def news_posts_from(data: Any, url: str) -> list[Mapping[str, Any]]:
     """Handle direct and URL-keyed result payloads returned by the API."""
     candidates: list[Any] = []
     if isinstance(data, Mapping):
-        candidates.append(data.get("repositories"))
+        candidates.append(data.get("news_posts"))
         page_data = data.get(url)
         if isinstance(page_data, Mapping):
-            candidates.append(page_data.get("repositories"))
+            candidates.append(page_data.get("news_posts"))
         for value in data.values():
             if isinstance(value, Mapping):
-                candidates.append(value.get("repositories"))
+                candidates.append(value.get("news_posts"))
 
     for candidate in candidates:
         if isinstance(candidate, list):
-            return [
-                repository
-                for repository in candidate
-                if isinstance(repository, Mapping)
-            ]
+            return [post for post in candidate if isinstance(post, Mapping)]
     return []
 
 
@@ -152,11 +144,9 @@ def usage_rows(usage: Any) -> list[list[str]]:
 def main() -> int:
     load_dotenv()
     parser = argparse.ArgumentParser(
-        description="Extract repository details and usage from a GitHub profile."
+        description="Extract news posts and usage from Hacker News."
     )
-    parser.add_argument(
-        "url", nargs="?", default=DEFAULT_URL, help="GitHub repositories URL"
-    )
+    parser.add_argument("url", nargs="?", default=DEFAULT_URL, help="Hacker News URL")
     parser.add_argument(
         "--base-url",
         default=os.getenv("MAKRA_BASE_URL", PRODUCTION_BASE_URL),
@@ -169,13 +159,13 @@ def main() -> int:
         print(
             "MAKRA_API_KEY is required. Add it to playground/.env or run: "
             "MAKRA_API_KEY='your-api-key' "
-            "python playground/scripts/github_repositories.py",
+            "python playground/scripts/hacker_news.py",
             file=sys.stderr,
         )
         return 2
 
     with Makra(api_key=api_key, base_url=args.base_url) as client:
-        response = client.extract([args.url], REPOSITORY_SCHEMA)
+        response = client.extract([args.url], NEWS_SCHEMA)
 
     if not isinstance(response, Mapping):
         print(f"Unexpected API response: {response!r}", file=sys.stderr)
@@ -190,37 +180,23 @@ def main() -> int:
         )
         return 1
 
-    repositories = repositories_from(response.get("data"), args.url)
-    print(f"Repositories from {args.url} ({len(repositories)} found)")
-    if repositories:
+    posts = news_posts_from(response.get("data"), args.url)
+    print(f"News posts from {args.url} ({len(posts)} found)")
+    if posts:
         print_table(
-            [
-                "Title",
-                "Description",
-                "Language",
-                "Stars",
-                "Forks",
-                "License",
-                "Last updated",
-                "Repository URL",
-            ],
+            ["Title", "Link", "Comments", "Upvotes"],
             [
                 [
-                    repository.get("title"),
-                    repository.get("description"),
-                    repository.get("language"),
-                    repository.get("stars"),
-                    repository.get("forks"),
-                    repository.get("license"),
-                    repository.get("last_updated"),
-                    repository.get("repository_url:$link")
-                    or repository.get("repository_url"),
+                    post.get("title"),
+                    post.get("link"),
+                    post.get("comments_count"),
+                    post.get("upvotes_count"),
                 ]
-                for repository in repositories
+                for post in posts
             ],
         )
     else:
-        print("No repositories were returned.")
+        print("No news posts were returned.")
 
     print("\nUsage")
     print_table(["Metric", "Value"], usage_rows(response.get("usage")))

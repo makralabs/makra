@@ -7,7 +7,7 @@ from types import ModuleType
 from typing import Any
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "github_repositories.py"
-DEVELOPMENT_BASE_URL = "http://localhost:8080"
+PRODUCTION_BASE_URL = "https://api.makralabs.org"
 
 
 def load_script() -> ModuleType:
@@ -19,7 +19,7 @@ def load_script() -> ModuleType:
     return module
 
 
-def test_main_defaults_to_local_gateway(monkeypatch: Any) -> None:
+def test_main_defaults_to_production_gateway(monkeypatch: Any) -> None:
     module = load_script()
     observed: dict[str, Any] = {}
 
@@ -43,8 +43,8 @@ def test_main_defaults_to_local_gateway(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(module, "Makra", FakeMakra)
     monkeypatch.setattr(sys, "argv", [str(SCRIPT)])
-    monkeypatch.setenv("API_KEY", "test-key")
+    monkeypatch.setenv("MAKRA_API_KEY", "test-key")
     monkeypatch.delenv("MAKRA_BASE_URL", raising=False)
 
     assert module.main() == 0
-    assert observed["base_url"] == DEVELOPMENT_BASE_URL
+    assert observed["base_url"] == PRODUCTION_BASE_URL

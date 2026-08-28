@@ -8,7 +8,7 @@
  *
  * const makra = new Makra({ apiKey: "mk_live_..." });
  *
- * // 1. Blocking REST — simplest, one call in, one result out.
+ * // 1. Convenient — durable submission, one call in, one result out.
  * const data = await makra.extract({ urls, schema });
  *
  * // 2. Streaming — watch a run happen, then read the stored result.

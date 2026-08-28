@@ -10,14 +10,14 @@ Install the local Python package once:
 python -m pip install -e sdk/python
 python playground/python.py
 python playground/python.py https://example.com
-API_KEY="your-api-key" python playground/scripts/github_repositories.py
+python playground/scripts/github_repositories.py
 ```
 
 If you use `uv`, it creates and manages a local environment with the checked-out
 SDK. It builds and imports Makra from this repository, not PyPI:
 
 ```bash
-API_KEY="your-api-key" uv run --project sdk/python python playground/scripts/github_repositories.py
+uv run --project sdk/python python playground/scripts/github_repositories.py
 ```
 
 The Node.js playground imports the local package source directly:
@@ -30,7 +30,11 @@ node playground/node.mjs https://example.com
 With no URL argument, each script only calls `ping`. With a URL, it also runs a
 small structured extraction.
 
+The scripts automatically load `playground/.env` without replacing variables
+already set in the shell.
+
 `scripts/github_repositories.py` runs the GitHub repositories extraction from
 the README example and prints repository data plus API usage as terminal
-tables. It reads `API_KEY` and defaults to `http://localhost:8080`. Use
-`MAKRA_BASE_URL` or `--base-url` to choose another gateway.
+tables. It reads `MAKRA_API_KEY` and defaults to `https://api.makralabs.org`.
+Use `MAKRA_BASE_URL` or `--base-url` to choose another gateway, such as a local
+development server.
