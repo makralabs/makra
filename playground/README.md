@@ -1,36 +1,37 @@
 # Makra SDK playground
 
-These scripts use `http://localhost:8080` (local public API gateway) and the
-documented dummy API key by default. Override either with `MAKRA_BASE_URL` or
-`MAKRA_API_KEY`.
+`python.py` and `node.mjs` are small local-gateway demos: they default to
+`http://localhost:8080` and a documented dummy API key. The Python extraction
+examples in `scripts/` call the production gateway and use `MAKRA_API_KEY`.
 
-Install the local Python package once:
-
-```bash
-python -m pip install -e sdk/python
-python playground/python.py
-python playground/python.py https://example.com
-API_KEY="your-api-key" python playground/scripts/github_repositories.py
-```
-
-If you use `uv`, it creates and manages a local environment with the checked-out
-SDK. It builds and imports Makra from this repository, not PyPI:
+Install the local SDK with the playground dependencies:
 
 ```bash
-API_KEY="your-api-key" uv run --project sdk/python python playground/scripts/github_repositories.py
+python -m pip install -e "sdk/python[playground]"
 ```
 
-The Node.js playground imports the local package source directly:
+Create `playground/.env`:
+
+```dotenv
+MAKRA_API_KEY=mk_live_...
+```
+
+Each script loads that file automatically. An already-exported
+`MAKRA_API_KEY` takes precedence. Run any example directly:
 
 ```bash
-node playground/node.mjs
-node playground/node.mjs https://example.com
+python playground/scripts/hacker_news_posts.py
+python playground/scripts/github_repositories.py
 ```
 
-With no URL argument, each script only calls `ping`. With a URL, it also runs a
-small structured extraction.
+With uv, use the checked-out SDK and its playground dependencies:
 
-`scripts/github_repositories.py` runs the GitHub repositories extraction from
-the README example and prints repository data plus API usage as terminal
-tables. It reads `API_KEY` and defaults to `http://localhost:8080`. Use
-`MAKRA_BASE_URL` or `--base-url` to choose another gateway.
+```bash
+uv run --project sdk/python --extra playground python \
+  playground/scripts/hacker_news_posts.py
+```
+
+Scripts default to `https://api.makralabs.org`; pass `--base-url` or set
+`MAKRA_BASE_URL` only when you intentionally need another gateway. Each example
+uses the Python SDK, streams workflow activity, and renders returned usage and
+extracted data in the terminal.
