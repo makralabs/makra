@@ -5,7 +5,7 @@ Structured web data extraction, in three shapes:
     from makra import Makra
 
     with Makra("mk_live_...") as makra:
-        # 1. Blocking REST — simplest, one call in, one result out.
+        # 1. Convenient — durable submission, one call in, one result out.
         data = makra.extract(["https://example.com"], {"title": "string"})
 
         # 2. Streaming — watch a run happen, then read the stored result.

@@ -1,13 +1,13 @@
 # Makra SDK Specification
 
-Status: **Normative draft for SDK version 0.2.0**
+Status: **Normative draft for SDK release v0.0.4**
 
 This document is the language-neutral source of truth for generating and
 maintaining the official `makra` packages for Python (PyPI) and JavaScript
 (npm). The words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative.
 Where this document and an implementation disagree, this document wins.
 
-Version 0.2.0 aligns the public behavior of the Python and JavaScript packages.
+Release v0.0.4 aligns the public behavior of the Python and JavaScript packages.
 Both ship typed response declarations, workflow configuration builders,
 outcome helpers, reserved-header rejection, operation argument validation, and
 `MakraResultError`. Language naming and duration units remain idiomatic.
@@ -43,7 +43,7 @@ configuration, telemetry processing, and API-key issuance are outside version
 | JavaScript | `makra` | `sdk/javascript` | Node.js 18, ESM |
 
 Both packages MUST use semantic versioning and SHOULD share a public SDK
-version. Both packages are `0.2.0`. The initial joint release was `0.1.0`.
+version. Both packages release as `v0.0.4`. The initial joint release was `v0.1.0`.
 
 Python MUST ship a `py.typed` marker and type hints. JavaScript MUST ship an
 ESM entry point and TypeScript declarations even though the implementation is
@@ -58,7 +58,7 @@ JavaScript.
 | Production base URL | `https://api.makralabs.org` | |
 | Development base URL constant | `http://localhost:8080` | |
 | API key fallback | `makra-development-key` | |
-| Request timeout | 300 s / 300,000 ms per origin page | Blocking submissions hold the connection until the run is terminal. Paginated extracts and sequential multi-URL extracts multiply this budget automatically unless the caller passes an explicit timeout. |
+| Request timeout | 300 s / 300,000 ms per origin page | This is the total convenient-workflow wait budget. Paginated extracts and sequential multi-URL extracts multiply it automatically unless the caller passes an explicit timeout. |
 | Connect timeout (Python only) | 10 s | |
 | Stream idle timeout | 90 s / 90,000 ms | The gateway heartbeats every 15 s; a far larger gap means a dead connection |
 | Max retries | 2 | |
@@ -132,11 +132,10 @@ storage (§5.9).
 
 The following request header names are SDK-owned and MUST be treated
 case-insensitively as reserved: `Api-Key`, `Content-Type`, `Accept`,
-`User-Agent`, `Idempotency-Key`, `Prefer`, `Last-Event-ID`. **Python 0.2.0:**
-collisions in `default_headers` MUST raise `ValueError` naming the header and
-the supported constructor or operation argument. Arbitrary tracing and
-application headers remain allowed. JavaScript parity for this rejection is
-outstanding.
+`User-Agent`, `Idempotency-Key`, `Prefer`, `Last-Event-ID`. Both SDKs MUST
+reject collisions in default headers, naming the header and the supported
+constructor or operation argument. Arbitrary tracing and application headers
+remain allowed.
 
 ## 4. Public clients
 
@@ -235,12 +234,19 @@ return type is unambiguous.
 
 | Mode | Selected by | Server response | SDK methods |
 | --- | --- | --- | --- |
-| Blocking | neither of the below | `200` with the workflow envelope | `extract`, `schema` |
+| Blocking | neither of the below | `200` with the workflow envelope | Wire-level mode only |
 | Streaming | body `"stream": true` | `200 text/event-stream` | `extract_stream`, `schema_stream` |
 | Deferred | header `Prefer: respond-async` | `202` with an admission object | `submit_extract`, `submit_schema` |
 
 A client MUST NOT send both `"stream": true` and `Prefer: respond-async` on one
 request.
+
+The convenient `extract` and `schema` methods MUST preserve their
+one-call return contract while using deferred submission internally: submit
+with `Prefer: respond-async`, poll the admitted run to a terminal state, then
+fetch its stored result. This prevents an ingress or proxy deadline from
+terminating a long workflow connection. `submit_extract` and `submit_schema`
+remain the explicit return-immediately APIs.
 
 ### 5.1 `ping` and `ready`
 
@@ -582,7 +588,7 @@ These keys are valid only on `extract` requests:
 | `pagination.additional_pages` | integer | `0` | Must be `>= 0`; pages beyond the origin URL |
 | `title.enabled` | boolean | deployment default | Generate a human-readable run title |
 
-When `pagination.enabled` is true, the default blocking and `wait` timeout
+When `pagination.enabled` is true, the default convenient-workflow and `wait` timeout
 MUST be `base * (1 + additional_pages)`. Sequential extract additionally
 multiplies by the URL count. An explicit `timeout` argument disables scaling.
 Stream idle timeout is unchanged: it bounds silence between SSE events, not
@@ -794,7 +800,7 @@ in both languages.
 New operations MUST be specified once in this document with an explicit
 language-to-wire mapping, then implemented and released in both packages.
 
-The 0.2.0 additions are available in both packages and MUST remain aligned.
+The v0.0.4 additions are available in both packages and MUST remain aligned.
 
 ## 10. Acceptance cases
 

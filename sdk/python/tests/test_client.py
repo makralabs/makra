@@ -15,7 +15,9 @@ from makra import (
     Makra,
     MakraAPIError,
     MakraResultError,
+    MakraRunFailedError,
     MakraStreamError,
+    MakraTimeoutError,
     ProxyRegion,
     ProxyRegionScopes,
     RunStates,
@@ -29,15 +31,46 @@ from makra import (
 
 class _RequestHandler(BaseHTTPRequestHandler):
     requests: List[Dict[str, Any]] = []
+    run_state = "completed"
+    run_success = True
+    result_payload: Dict[str, Any] = {
+        "success": True,
+        "status": "succeeded",
+        "data": {"title": "Makra"},
+    }
 
     def do_GET(self):
         self._record_request()
+        if self.path == "/workflows/runs/run-extract":
+            self._send_json(
+                200,
+                {
+                    "id": "run-extract",
+                    "state": self.run_state,
+                    "success": self.run_success,
+                    "poll_after_ms": 1,
+                },
+            )
+            return
+        if self.path == "/workflows/runs/run-extract/result":
+            self._send_json(200, self.result_payload)
+            return
         self._send_json(200, {"status": "ok"})
 
     def do_POST(self):
         self._record_request()
         if self.path == "/workflows/extract":
-            self._send_json(200, {"success": True, "data": {"title": "Makra"}})
+            if self.headers.get("Prefer") == "respond-async":
+                self._send_json(
+                    202,
+                    {
+                        "run_id": "run-extract",
+                        "state": "queued",
+                        "feature": "extract",
+                    },
+                )
+                return
+            self._send_json(200, self.result_payload)
             return
         if self.path == "/workflows/schema":
             self._send_json(422, {"detail": "Invalid URL"})
@@ -71,6 +104,13 @@ class _RequestHandler(BaseHTTPRequestHandler):
 @pytest.fixture()
 def api_server():
     _RequestHandler.requests = []
+    _RequestHandler.run_state = "completed"
+    _RequestHandler.run_success = True
+    _RequestHandler.result_payload = {
+        "success": True,
+        "status": "succeeded",
+        "data": {"title": "Makra"},
+    }
     server = ThreadingHTTPServer(("127.0.0.1", 0), _RequestHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -111,9 +151,14 @@ def test_extract_sends_the_workflow_wire_payload(api_server):
             config=config,
         )
 
-    assert result == {"success": True, "data": {"title": "Makra"}}
+    assert result == {
+        "success": True,
+        "status": "succeeded",
+        "data": {"title": "Makra"},
+    }
     request = _RequestHandler.requests[0]
     assert request["path"] == "/workflows/extract"
+    assert request["headers"]["Prefer"] == "respond-async"
     assert request["body"] == {
         "urls": ["https://example.com"],
         "schema": {"title": "Title of the page"},
@@ -131,6 +176,11 @@ def test_extract_sends_the_workflow_wire_payload(api_server):
             },
         },
     }
+    assert [request["path"] for request in _RequestHandler.requests] == [
+        "/workflows/extract",
+        "/workflows/runs/run-extract",
+        "/workflows/runs/run-extract/result",
+    ]
 
 
 def test_schema_sends_the_workflow_wire_payload(api_server):
@@ -250,6 +300,65 @@ def test_async_client_has_the_same_ping_contract(api_server):
     assert asyncio.run(ping()) == {"status": "ok"}
 
 
+def test_async_extract_uses_durable_submission_and_returns_result(api_server):
+    async def extract():
+        async with AsyncMakra(api_key="test-key", base_url=api_server) as client:
+            return await client.extract(["https://example.com"], {"title": "Title"})
+
+    assert asyncio.run(extract()) == _RequestHandler.result_payload
+    assert [request["path"] for request in _RequestHandler.requests] == [
+        "/workflows/extract",
+        "/workflows/runs/run-extract",
+        "/workflows/runs/run-extract/result",
+    ]
+    assert _RequestHandler.requests[0]["headers"]["Prefer"] == "respond-async"
+
+
+def test_extract_returns_completed_domain_failure_result(api_server):
+    _RequestHandler.run_success = False
+    _RequestHandler.result_payload = {
+        "success": False,
+        "status": "failed",
+        "message": "Page access was blocked",
+    }
+
+    with Makra(api_key="test-key", base_url=api_server) as client:
+        result = client.extract(["https://example.com"], {"title": "Title"})
+
+    assert result == _RequestHandler.result_payload
+
+
+def test_extract_raises_for_non_completed_terminal_run(api_server):
+    _RequestHandler.run_state = "cancelled"
+    _RequestHandler.run_success = False
+
+    with Makra(api_key="test-key", base_url=api_server) as client:
+        with pytest.raises(MakraRunFailedError) as captured:
+            client.extract(["https://example.com"], {"title": "Title"})
+
+    assert captured.value.run_id == "run-extract"
+    assert captured.value.state == "cancelled"
+    assert all(
+        request["path"] != "/workflows/runs/run-extract/result"
+        for request in _RequestHandler.requests
+    )
+
+
+def test_extract_timeout_keeps_recoverable_run_id(api_server):
+    _RequestHandler.run_state = "running"
+
+    with Makra(api_key="test-key", base_url=api_server) as client:
+        with pytest.raises(MakraTimeoutError) as captured:
+            client.extract(
+                ["https://example.com"],
+                {"title": "Title"},
+                timeout=0.001,
+            )
+
+    assert captured.value.run_id == "run-extract"
+    assert "get_run('run-extract')" in str(captured.value)
+
+
 def test_invalid_public_arguments_fail_before_network_io(api_server):
     with Makra(api_key="test-key", base_url=api_server) as client:
         with pytest.raises(ValueError, match="timeout must be greater than 0"):
@@ -357,9 +466,12 @@ def test_option_objects_emit_the_same_wire_payload_as_equivalent_dictionaries(ap
         mapped = client.extract(urls, schema, config=mapping)
         optioned = client.extract(urls, schema, config=options)
 
-    assert mapped == optioned == {"success": True, "data": {"title": "Makra"}}
-    assert _RequestHandler.requests[0]["body"] == _RequestHandler.requests[1]["body"]
-    assert _RequestHandler.requests[0]["body"]["config"]["crawler"]["recovery"] == {
+    assert mapped == optioned == _RequestHandler.result_payload
+    submissions = [
+        request for request in _RequestHandler.requests if request["method"] == "POST"
+    ]
+    assert submissions[0]["body"] == submissions[1]["body"]
+    assert submissions[0]["body"]["config"]["crawler"]["recovery"] == {
         "one_last_retry": True,
     }
 
@@ -500,7 +612,9 @@ def test_result_redirect_does_not_forward_api_key(result_server):
 def test_missing_result_location_raises_result_error(result_server):
     _ResultRedirectHandler.location = None
     with Makra(api_key="secret-key", base_url=result_server) as client:
-        with pytest.raises(MakraResultError, match="did not include a location") as captured:
+        with pytest.raises(
+            MakraResultError, match="did not include a location"
+        ) as captured:
             client.get_run_result("run-1")
 
     error = captured.value

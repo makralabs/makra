@@ -1,6 +1,6 @@
 # Makra SDK playground
 
-`python.py` and `node.mjs` are small local-gateway demos: they default to
+`python.py` and `node.mjs` are small local-gateway demos. They default to
 `http://localhost:8080` and a documented dummy API key. The Python extraction
 examples in `scripts/` call the production gateway and use `MAKRA_API_KEY`.
 
@@ -16,8 +16,8 @@ Create `playground/.env`:
 MAKRA_API_KEY=mk_live_...
 ```
 
-Each script loads that file automatically. An already-exported
-`MAKRA_API_KEY` takes precedence. Run any example directly:
+Each script loads that file automatically. An exported `MAKRA_API_KEY` takes
+precedence. Run an example directly:
 
 ```bash
 python playground/scripts/hacker_news_posts.py
@@ -31,7 +31,7 @@ uv run --project sdk/python --extra playground python \
   playground/scripts/hacker_news_posts.py
 ```
 
-Scripts default to `https://api.makralabs.org`; pass `--base-url` or set
-`MAKRA_BASE_URL` only when you intentionally need another gateway. Each example
-uses the Python SDK, streams workflow activity, and renders returned usage and
-extracted data in the terminal.
+Scripts default to `https://api.makralabs.org`. Pass `--base-url` or set
+`MAKRA_BASE_URL` only when you need another gateway. Every example uses the
+Python SDK, streams workflow activity, then prints extracted data and a compact
+usage summary.

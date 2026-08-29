@@ -2,7 +2,7 @@
 
 Both clients expose the same three ways to run a workflow:
 
-* ``extract`` / ``schema`` — blocking REST. One request, one result.
+* ``extract`` / ``schema`` — submit durably, wait, and return one result.
 * ``extract_stream`` / ``schema_stream`` — live progress events over SSE.
 * ``submit_extract`` / ``submit_schema`` — fire and forget, returning a handle
   that can be polled, streamed, or cancelled later.
@@ -333,23 +333,21 @@ class Makra(_BaseClient):
         idempotency_key: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> ExtractResponse | ResponseBody:
-        """Extract structured data and wait for the result.
+        """Extract structured data and wait for the durable run's result.
 
-        The connection is held until the run is terminal, so ``timeout`` is
-        effectively the longest a workflow may take. When omitted, the client
-        default is a per-page budget: paginated extracts and sequential
-        multi-URL extracts get a proportionally longer deadline.
+        The SDK submits the run asynchronously and polls it, so no HTTP
+        connection must remain open for the duration of the workflow.
+        ``timeout`` is the total wait deadline. A client timeout never cancels
+        the server-side run.
         """
         payload = build_extract_payload(
             urls, schema, execution_mode=execution_mode, config=config
         )
-        return self._request(
-            "POST",
+        return self._run_workflow(
             PATH_EXTRACT,
-            json=payload,
-            headers=self._validated_submit_headers(idempotency_key),
-            timeout=self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
-            retryable=True,
+            payload,
+            idempotency_key,
+            self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
         )
 
     def schema(
@@ -361,17 +359,15 @@ class Makra(_BaseClient):
         idempotency_key: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> SchemaResponse | ResponseBody:
-        """Build a JSON Schema describing everything one page contains."""
+        """Build a JSON Schema and wait for the durable run's result."""
         payload = build_schema_payload(
             url, only_memoized=only_memoized, config=config
         )
-        return self._request(
-            "POST",
+        return self._run_workflow(
             PATH_SCHEMA,
-            json=payload,
-            headers=self._validated_submit_headers(idempotency_key),
-            timeout=self._workflow_timeout(timeout, payload),
-            retryable=True,
+            payload,
+            idempotency_key,
+            self._workflow_timeout(timeout, payload),
         )
 
     # --- Streaming workflows ------------------------------------------------
@@ -525,9 +521,13 @@ class Makra(_BaseClient):
             delay = self._next_poll_delay(run, poll_interval)
             if time.monotonic() + delay > deadline:
                 raise MakraTimeoutError(
-                    "Workflow run {} did not finish in time".format(run_id),
+                    "Workflow run {} is still processing after the configured "
+                    "timeout; retrieve it later with get_run({!r})".format(
+                        run_id, run_id
+                    ),
                     method="GET",
                     path=run_path(run_id),
+                    run_id=run_id,
                 )
             time.sleep(delay)
 
@@ -557,6 +557,20 @@ class Makra(_BaseClient):
         parsed: Dict[str, Any] = {}
         parsed.update(admission)
         return parsed
+
+    def _run_workflow(
+        self,
+        path: str,
+        payload: Dict[str, Any],
+        idempotency_key: Optional[str],
+        timeout: float,
+    ) -> ResponseBody:
+        admission = self._submit(path, payload, idempotency_key)
+        run_id = str(admission.get("run_id", "")).strip()
+        if not run_id:
+            raise MakraResultError("Workflow admission did not include a run ID")
+        self.wait_for_run(run_id, timeout=timeout)
+        return self.get_run_result(run_id)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self._send(method, path, **kwargs)
@@ -735,13 +749,11 @@ class AsyncMakra(_BaseClient):
         payload = build_extract_payload(
             urls, schema, execution_mode=execution_mode, config=config
         )
-        return await self._request(
-            "POST",
+        return await self._run_workflow(
             PATH_EXTRACT,
-            json=payload,
-            headers=self._validated_submit_headers(idempotency_key),
-            timeout=self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
-            retryable=True,
+            payload,
+            idempotency_key,
+            self._workflow_timeout(timeout, payload, url_count=len(payload["urls"])),
         )
 
     async def schema(
@@ -756,13 +768,11 @@ class AsyncMakra(_BaseClient):
         payload = build_schema_payload(
             url, only_memoized=only_memoized, config=config
         )
-        return await self._request(
-            "POST",
+        return await self._run_workflow(
             PATH_SCHEMA,
-            json=payload,
-            headers=self._validated_submit_headers(idempotency_key),
-            timeout=self._workflow_timeout(timeout, payload),
-            retryable=True,
+            payload,
+            idempotency_key,
+            self._workflow_timeout(timeout, payload),
         )
 
     # --- Streaming workflows ------------------------------------------------
@@ -897,9 +907,13 @@ class AsyncMakra(_BaseClient):
             delay = self._next_poll_delay(run, poll_interval)
             if time.monotonic() + delay > deadline:
                 raise MakraTimeoutError(
-                    "Workflow run {} did not finish in time".format(run_id),
+                    "Workflow run {} is still processing after the configured "
+                    "timeout; retrieve it later with get_run({!r})".format(
+                        run_id, run_id
+                    ),
                     method="GET",
                     path=run_path(run_id),
+                    run_id=run_id,
                 )
             await asyncio.sleep(delay)
 
@@ -928,6 +942,20 @@ class AsyncMakra(_BaseClient):
         parsed: Dict[str, Any] = {}
         parsed.update(admission)
         return parsed
+
+    async def _run_workflow(
+        self,
+        path: str,
+        payload: Dict[str, Any],
+        idempotency_key: Optional[str],
+        timeout: float,
+    ) -> ResponseBody:
+        admission = await self._submit(path, payload, idempotency_key)
+        run_id = str(admission.get("run_id", "")).strip()
+        if not run_id:
+            raise MakraResultError("Workflow admission did not include a run ID")
+        await self.wait_for_run(run_id, timeout=timeout)
+        return await self.get_run_result(run_id)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         response = await self._send(method, path, **kwargs)

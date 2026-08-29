@@ -152,7 +152,7 @@ export interface HealthResponse {
   [key: string]: unknown;
 }
 
-/** Stable fields on a blocking workflow response. The result data is caller-defined. */
+/** Stable fields on a completed workflow response. The result data is caller-defined. */
 export interface WorkflowEnvelope {
   success?: boolean;
   status?: string;
@@ -352,7 +352,9 @@ export declare class MakraConnectionError extends MakraError {
   readonly path: string;
 }
 
-export declare class MakraTimeoutError extends MakraConnectionError {}
+export declare class MakraTimeoutError extends MakraConnectionError {
+  readonly runId?: string;
+}
 
 export declare class MakraStreamError extends MakraError {
   readonly runId?: string;

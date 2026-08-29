@@ -20,7 +20,7 @@ DOCS_FENCE_PATHS = [
     / "docs"
     / "docs"
     / "docs"
-    / "v0.0.3-beta"
+    / "v0.0.4-beta"
     / "makra-sdk"
     / "getting-started"
     / "first-extraction.md",
@@ -44,13 +44,9 @@ class _GoldenHandler(BaseHTTPRequestHandler):
             }
         )
         if self.path == "/workflows/extract":
-            payload = {
-                "success": True,
-                "status": "succeeded",
-                "data": {GOLDEN_URL: GOLDEN_RESULT},
-            }
+            payload = {"run_id": "run-golden", "state": "queued"}
             body = json.dumps(payload).encode()
-            self.send_response(200)
+            self.send_response(202)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -58,6 +54,29 @@ class _GoldenHandler(BaseHTTPRequestHandler):
             return
         self.send_response(404)
         self.end_headers()
+
+    def do_GET(self):
+        self.requests.append(
+            {"path": self.path, "headers": dict(self.headers), "body": None}
+        )
+        if self.path == "/workflows/runs/run-golden":
+            payload = {"id": "run-golden", "state": "completed", "success": True}
+        elif self.path == "/workflows/runs/run-golden/result":
+            payload = {
+                "success": True,
+                "status": "succeeded",
+                "data": {GOLDEN_URL: GOLDEN_RESULT},
+            }
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, format, *args):
         return
@@ -110,6 +129,12 @@ def test_golden_quickstart_runs_against_local_server(golden_server):
     assert request["body"]["urls"] == [GOLDEN_URL]
     assert request["body"]["schema"]["name"] == "The main product name"
     assert request["headers"].get("Api-Key") == "makra-development-key"
+    assert request["headers"].get("Prefer") == "respond-async"
+    assert [request["path"] for request in _GoldenHandler.requests] == [
+        "/workflows/extract",
+        "/workflows/runs/run-golden",
+        "/workflows/runs/run-golden/result",
+    ]
 
 
 @pytest.mark.integration

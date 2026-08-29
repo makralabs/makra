@@ -87,7 +87,12 @@ export class MakraConnectionError extends MakraError {
 }
 
 /** The request or an event stream exceeded its configured timeout. */
-export class MakraTimeoutError extends MakraConnectionError {}
+export class MakraTimeoutError extends MakraConnectionError {
+  constructor(message, { runId, ...options } = {}) {
+    super(message, options);
+    this.runId = runId ?? undefined;
+  }
+}
 
 /** An event stream ended before a terminal event and could not resume. */
 export class MakraStreamError extends MakraError {

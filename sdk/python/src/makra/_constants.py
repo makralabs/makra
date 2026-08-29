@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import FrozenSet
 
-SDK_VERSION = "0.2.0"
+SDK_VERSION = "0.0.4"
 USER_AGENT = "makra-python/" + SDK_VERSION
 
 # --- Endpoints -------------------------------------------------------------

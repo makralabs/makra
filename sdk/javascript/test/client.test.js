@@ -22,8 +22,27 @@ beforeEach(async () => {
         body: rawBody ? JSON.parse(rawBody) : undefined,
       });
 
-      if (request.url === "/workflows/extract") {
-        sendJson(response, 200, { success: true, data: { title: "Makra" } });
+      if (
+        request.url === "/workflows/extract" &&
+        request.headers.prefer === "respond-async"
+      ) {
+        sendJson(response, 202, {
+          run_id: "run-extract",
+          feature: "extract",
+          state: "queued",
+        });
+      } else if (request.url === "/workflows/runs/run-extract") {
+        sendJson(response, 200, {
+          id: "run-extract",
+          state: "completed",
+          success: true,
+        });
+      } else if (request.url === "/workflows/runs/run-extract/result") {
+        sendJson(response, 200, {
+          success: true,
+          status: "succeeded",
+          data: { title: "Makra" },
+        });
       } else if (request.url === "/workflows/schema") {
         sendJson(response, 422, { detail: "Invalid URL" });
       } else if (request.url === "/healthz") {
@@ -75,8 +94,13 @@ test("extract sends the workflow wire payload", async () => {
     },
   });
 
-  assert.deepEqual(result, { success: true, data: { title: "Makra" } });
+  assert.deepEqual(result, {
+    success: true,
+    status: "succeeded",
+    data: { title: "Makra" },
+  });
   assert.equal(requests[0].path, "/workflows/extract");
+  assert.equal(requests[0].headers.prefer, "respond-async");
   assert.deepEqual(requests[0].body, {
     urls: ["https://example.com"],
     schema: { title: "Title of the page" },
@@ -94,6 +118,14 @@ test("extract sends the workflow wire payload", async () => {
       },
     },
   });
+  assert.deepEqual(
+    requests.map((request) => request.path),
+    [
+      "/workflows/extract",
+      "/workflows/runs/run-extract",
+      "/workflows/runs/run-extract/result",
+    ],
+  );
 });
 
 test("schema sends the workflow wire payload", async () => {
